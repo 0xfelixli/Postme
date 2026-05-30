@@ -342,28 +342,11 @@ private struct RequestCommandBar: View {
     @Binding var responseSearchText: String
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 5) {
             HStack(spacing: 8) {
-                TextField("Request name", text: $request.name)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(PostmeTheme.raised, in: RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius)
-                            .stroke(PostmeTheme.separator.opacity(0.30))
-                    }
-                    .frame(minWidth: 168, idealWidth: 214, maxWidth: 270)
-
                 MethodBadge(method: request.method)
                 SchemeBadge(scheme: requestScheme)
-
-                Text(request.url)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                RequestURLField(url: request.url)
 
                 Button {
                     Task { await store.sendSelectedRequest() }
@@ -380,14 +363,10 @@ private struct RequestCommandBar: View {
             }
 
             HStack(spacing: 6) {
+                RequestNameField(name: $request.name)
                 TargetPill(title: "Target", value: targetSummary)
+                    .frame(maxWidth: 260, alignment: .leading)
                 TargetPill(title: "Mode", value: "Raw HTTP")
-                Rectangle()
-                    .fill(PostmeTheme.separator.opacity(0.45))
-                    .frame(width: 1, height: 18)
-                    .padding(.horizontal, 2)
-
-                Spacer(minLength: 8)
 
                 IconToolButton(systemName: "doc.on.doc", help: "Copy request") {
                     Clipboard.copy(rawBinding.wrappedValue)
@@ -403,9 +382,9 @@ private struct RequestCommandBar: View {
                     store.normalizeSelectedRawRequest()
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
-            }
 
-            HStack(spacing: 8) {
+                Spacer(minLength: 12)
+
                 if let response {
                     ResponseStatusPill(response: response)
                     MetricPill(value: "\(Int(response.duration * 1000)) ms")
@@ -417,8 +396,6 @@ private struct RequestCommandBar: View {
                 } else {
                     MetricPill(value: "No response")
                 }
-
-                Spacer(minLength: 6)
 
                 HStack(spacing: 7) {
                     Image(systemName: "magnifyingglass")
@@ -435,7 +412,7 @@ private struct RequestCommandBar: View {
                         .foregroundStyle(.secondary)
                     }
                 }
-                .frame(width: 168)
+                .frame(width: 156)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(PostmeTheme.raised, in: RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius))
@@ -465,13 +442,13 @@ private struct RequestCommandBar: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(width: 178)
+                    .frame(width: 166)
                 }
             }
         }
         .controlSize(.small)
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .background(PostmeTheme.toolbar)
     }
 
@@ -514,6 +491,58 @@ private struct RequestCommandBar: View {
             .split(separator: "\n", omittingEmptySubsequences: false)
             .filter { $0.localizedCaseInsensitiveContains(trimmedSearch) }
             .joined(separator: "\n")
+    }
+}
+
+private struct RequestURLField: View {
+    let url: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "link")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+
+            Text(url)
+                .font(.system(size: 12.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 26)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PostmeTheme.raised, in: RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius)
+                .stroke(PostmeTheme.separator.opacity(0.30))
+        }
+    }
+}
+
+private struct RequestNameField: View {
+    @Binding var name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Name".uppercased())
+                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(.tertiary)
+
+            TextField("Request name", text: $name)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .frame(minWidth: 136, idealWidth: 174, maxWidth: 198)
+        .background(PostmeTheme.raised.opacity(0.82), in: RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(PostmeTheme.separator.opacity(0.24))
+        }
     }
 }
 
@@ -950,7 +979,7 @@ private enum HTTPStatusTone {
 }
 
 private enum PostmeLayout {
-    static let requestToolbarHeight: CGFloat = 88
+    static let requestToolbarHeight: CGFloat = 68
     static let panePadding: CGFloat = 12
     static let cornerRadius: CGFloat = 7
 }
