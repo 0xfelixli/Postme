@@ -19,9 +19,6 @@ struct ContentView: View {
                         RequestCommandBar(
                             request: Binding(get: box.get, set: box.set),
                             store: store,
-                            response: store.response,
-                            errorMessage: store.errorMessage,
-                            isSending: store.isSending,
                             responseViewMode: responseViewMode,
                             responseSearchText: $responseSearchText
                         )
@@ -337,9 +334,6 @@ private struct EnvironmentVariableRow: View {
 private struct RequestCommandBar: View {
     @Binding var request: APIRequest
     @ObservedObject var store: PostmeStore
-    var response: ResponseSnapshot?
-    var errorMessage: String?
-    var isSending: Bool
     let responseViewMode: ResponseViewMode
     @Binding var responseSearchText: String
 
@@ -360,8 +354,8 @@ private struct RequestCommandBar: View {
                 .buttonStyle(.borderedProminent)
                 .tint(PostmeTheme.accent)
                 .accessibilityLabel(store.isSending ? "Sending" : "Send request")
-                .disabled(store.isSending || rawBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .clickableHoverEffect(isEnabled: !store.isSending && !rawBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend)
+                .clickableHoverEffect(isEnabled: canSend)
             }
 
             HStack(spacing: 6) {
@@ -387,13 +381,13 @@ private struct RequestCommandBar: View {
 
                 Spacer(minLength: 12)
 
-                if let response {
+                if let response = store.response {
                     ResponseStatusPill(response: response)
                     MetricPill(value: "\(Int(response.duration * 1000)) ms")
                     MetricPill(value: ByteCountFormatter.string(fromByteCount: Int64(response.size), countStyle: .file))
-                } else if isSending {
+                } else if store.isSending {
                     MetricPill(value: "Sending")
-                } else if errorMessage != nil {
+                } else if store.errorMessage != nil {
                     MetricPill(value: "Error")
                 } else {
                     MetricPill(value: "No response")
@@ -425,12 +419,12 @@ private struct RequestCommandBar: View {
                 }
 
                 IconToolButton(systemName: "doc.on.doc", help: "Copy response") {
-                    if let response {
-                        Clipboard.copy(displayText(for: response))
+                    if let response = store.response {
+                        Clipboard.copy(ResponseDisplayFormatter.text(for: response, mode: responseViewMode, searchText: responseSearchText).text)
                     }
                 }
-                .disabled(response == nil)
-                .opacity(response == nil ? 0.45 : 1)
+                .disabled(store.response == nil)
+                .opacity(store.response == nil ? 0.45 : 1)
             }
         }
         .controlSize(.small)
@@ -446,6 +440,10 @@ private struct RequestCommandBar: View {
         )
     }
 
+    private var canSend: Bool {
+        !store.isSending && !rawBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var requestScheme: String {
         URL(string: request.url)?.scheme?.uppercased() ?? "RAW"
     }
@@ -458,26 +456,6 @@ private struct RequestCommandBar: View {
             return "\(host):\(port)"
         }
         return host
-    }
-
-    private func displayText(for response: ResponseSnapshot) -> String {
-        let value: String
-        switch responseViewMode {
-        case .raw:
-            value = response.rawHTTPText
-        case .pretty:
-            value = response.prettyBody
-        case .hex:
-            value = response.rawHTTPText.hexDump()
-        }
-
-        let trimmedSearch = responseSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSearch.isEmpty else { return value }
-
-        return value
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { $0.localizedCaseInsensitiveContains(trimmedSearch) }
-            .joined(separator: "\n")
     }
 }
 
@@ -577,10 +555,11 @@ private struct ResponsePreviewView: View {
                 }
                 .padding(PostmeLayout.panePadding)
             } else if let response {
-                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle(for: response), systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode), accessory: {
+                let rendered = ResponseDisplayFormatter.text(for: response, mode: viewMode, searchText: searchText)
+                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle(rendered), systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode), accessory: {
                     responseModePicker
                 }) {
-                    RawResponseSurface(text: displayText(for: response))
+                    RawResponseSurface(text: rendered.text)
                 }
                 .padding(PostmeLayout.panePadding)
             } else {
@@ -614,32 +593,6 @@ private struct ResponsePreviewView: View {
             : "Raw HTTP response, headers, timing, and size will appear here"
     }
 
-    private func displayText(for response: ResponseSnapshot) -> String {
-        let value = baseDisplayText(for: response)
-        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSearch.isEmpty else { return value }
-
-        let matches = matchingLines(in: value, query: trimmedSearch)
-        return matches.isEmpty ? "No response lines match \"\(trimmedSearch)\"." : matches.joined(separator: "\n")
-    }
-
-    private func baseDisplayText(for response: ResponseSnapshot) -> String {
-        switch viewMode {
-        case .raw:
-            return response.rawHTTPText
-        case .pretty:
-            return response.prettyHTTPText
-        case .hex:
-            return response.rawHTTPText.hexDump()
-        }
-    }
-
-    private func matchingLines(in value: String, query: String) -> [String.SubSequence] {
-        value
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { $0.localizedCaseInsensitiveContains(query) }
-    }
-
     private var responsePaneTitle: String {
         switch viewMode {
         case .raw:
@@ -651,13 +604,11 @@ private struct ResponsePreviewView: View {
         }
     }
 
-    private func responsePaneSubtitle(for response: ResponseSnapshot) -> String {
-        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedSearch.isEmpty {
-            let count = matchingLines(in: baseDisplayText(for: response), query: trimmedSearch).count
+    private func responsePaneSubtitle(_ rendered: ResponseDisplayFormatter.Result) -> String {
+        if let count = rendered.matchCount {
             return count == 1
-                ? "1 matching line for \"\(trimmedSearch)\""
-                : "\(count) matching lines for \"\(trimmedSearch)\""
+                ? "1 matching line for \"\(rendered.searchText)\""
+                : "\(count) matching lines for \"\(rendered.searchText)\""
         }
 
         switch viewMode {
@@ -677,6 +628,164 @@ private enum ResponseViewMode: String, CaseIterable, Identifiable {
     case hex = "Hex"
 
     var id: String { rawValue }
+}
+
+private enum ResponseDisplayFormatter {
+    struct Result {
+        let text: String
+        let searchText: String
+        let matchCount: Int?
+    }
+
+    static func text(for response: ResponseSnapshot, mode: ResponseViewMode, searchText: String) -> Result {
+        let baseText = baseText(for: response, mode: mode)
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else {
+            return Result(text: baseText, searchText: "", matchCount: nil)
+        }
+
+        let matches = baseText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.localizedCaseInsensitiveContains(trimmedSearch) }
+
+        return Result(
+            text: matches.isEmpty ? "No response lines match \"\(trimmedSearch)\"." : matches.joined(separator: "\n"),
+            searchText: trimmedSearch,
+            matchCount: matches.count
+        )
+    }
+
+    private static func baseText(for response: ResponseSnapshot, mode: ResponseViewMode) -> String {
+        switch mode {
+        case .raw:
+            return response.rawHTTPText
+        case .pretty:
+            return prettyHTTPText(for: response)
+        case .hex:
+            return response.rawHTTPText.hexDump()
+        }
+    }
+
+    private static func prettyHTTPText(for response: ResponseSnapshot) -> String {
+        ([statusLine(for: response)] + headerLines(for: response) + ["", prettyBody(for: response)]).joined(separator: "\n")
+    }
+
+    private static func statusLine(for response: ResponseSnapshot) -> String {
+        response.statusCode > 0 ? "HTTP/1.1 \(response.statusLine)" : "HTTP/1.1 0 Unknown"
+    }
+
+    private static func headerLines(for response: ResponseSnapshot) -> [String] {
+        response.headers
+            .keys
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .compactMap { key -> String? in
+                guard let value = response.headers[key] else { return nil }
+                return "\(key): \(value)"
+            }
+    }
+
+    private static func prettyBody(for response: ResponseSnapshot) -> String {
+        guard
+            let data = response.body.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data)
+        else {
+            return response.body
+        }
+
+        return JSONDisplayRenderer.render(object)
+    }
+}
+
+private enum JSONDisplayRenderer {
+    static func render(_ value: Any) -> String {
+        render(value, level: 0)
+    }
+
+    private static func render(_ value: Any, level: Int) -> String {
+        switch value {
+        case let dictionary as [String: Any]:
+            return renderDictionary(dictionary, level: level)
+        case let array as [Any]:
+            return renderArray(array, level: level)
+        case let string as String:
+            return renderString(string, continuationIndent: indent(level + 1))
+        case let number as NSNumber:
+            return renderNumber(number)
+        case _ as NSNull:
+            return "null"
+        default:
+            return renderString(String(describing: value), continuationIndent: indent(level + 1))
+        }
+    }
+
+    private static func renderDictionary(_ dictionary: [String: Any], level: Int) -> String {
+        guard !dictionary.isEmpty else { return "{}" }
+
+        let keyIndent = indent(level + 1)
+        let lines = dictionary.keys.sorted().map { key -> String in
+            let value = dictionary[key] ?? NSNull()
+            return "\(keyIndent)\"\(escape(key))\": \(render(value, level: level + 1))"
+        }
+
+        return "{\n\(lines.joined(separator: ",\n"))\n\(indent(level))}"
+    }
+
+    private static func renderArray(_ array: [Any], level: Int) -> String {
+        guard !array.isEmpty else { return "[]" }
+
+        let itemIndent = indent(level + 1)
+        let lines = array.map { "\(itemIndent)\(render($0, level: level + 1))" }
+        return "[\n\(lines.joined(separator: ",\n"))\n\(indent(level))]"
+    }
+
+    private static func renderString(_ value: String, continuationIndent: String) -> String {
+        let escaped = escape(value)
+        guard escaped.contains("\n") else {
+            return "\"\(escaped)\""
+        }
+
+        let lines = escaped
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+
+        return "\"" + lines.enumerated().map { index, line in
+            index == 0 ? line : "\(continuationIndent)\(line)"
+        }.joined(separator: "\n") + "\""
+    }
+
+    private static func renderNumber(_ number: NSNumber) -> String {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue ? "true" : "false"
+        }
+
+        return number.stringValue
+    }
+
+    private static func escape(_ value: String) -> String {
+        var output = ""
+        output.reserveCapacity(value.count)
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\"":
+                output += "\\\""
+            case "\\":
+                output += "\\\\"
+            case "\n":
+                output += "\n"
+            case "\r":
+                output += "\\r"
+            case "\t":
+                output += "\\t"
+            default:
+                output.unicodeScalars.append(scalar)
+            }
+        }
+        return output
+    }
+
+    private static func indent(_ level: Int) -> String {
+        String(repeating: "  ", count: level)
+    }
 }
 
 private struct CommandPaletteView: View {
@@ -1681,9 +1790,9 @@ private enum HTTPHighlighter {
     }
 
     private static func requestMethodRange(in line: String) -> Range<String.Index>? {
-        let methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-        return methods.compactMap { method in
-            line.hasPrefix("\(method) ") ? line.startIndex..<line.index(line.startIndex, offsetBy: method.count) : nil
+        HTTPMethod.allCases.compactMap { method in
+            let method = method.rawValue
+            return line.hasPrefix("\(method) ") ? line.startIndex..<line.index(line.startIndex, offsetBy: method.count) : nil
         }.first
     }
 
@@ -1884,10 +1993,9 @@ private struct RawSurfaceStyleModifier: ViewModifier {
     }
 }
 
-private struct ClickableHoverEffectModifier: ViewModifier {
+private struct ClickableHoverStyleModifier: ViewModifier {
     @Environment(\.isEnabled) private var environmentEnabled
     @State private var isHovering = false
-    @State private var isCursorActive = false
     var isEnabled = true
 
     private var isActive: Bool {
@@ -1899,6 +2007,20 @@ private struct ClickableHoverEffectModifier: ViewModifier {
             .shadow(color: isActive ? Color.black.opacity(0.16) : .clear, radius: isActive ? 5 : 0, x: 0, y: isActive ? 2 : 0)
             .scaleEffect(isActive ? 1.012 : 1)
             .animation(.easeOut(duration: 0.14), value: isActive)
+            .onHover { isHovering in
+                self.isHovering = isHovering
+            }
+    }
+}
+
+private struct PointingHandCursorModifier: ViewModifier {
+    @Environment(\.isEnabled) private var environmentEnabled
+    @State private var isHovering = false
+    @State private var isCursorActive = false
+    var isEnabled = true
+
+    func body(content: Content) -> some View {
+        content
             .onHover { isHovering in
                 self.isHovering = isHovering
                 updateCursor(isHovering && isEnabled && environmentEnabled)
@@ -1924,7 +2046,8 @@ private struct ClickableHoverEffectModifier: ViewModifier {
 
 private extension View {
     func clickableHoverEffect(isEnabled: Bool = true) -> some View {
-        modifier(ClickableHoverEffectModifier(isEnabled: isEnabled))
+        modifier(ClickableHoverStyleModifier(isEnabled: isEnabled))
+            .modifier(PointingHandCursorModifier(isEnabled: isEnabled))
     }
 
     func rawEditorStyle() -> some View {

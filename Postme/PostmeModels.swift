@@ -112,10 +112,6 @@ struct ResponseSnapshot: Codable, Equatable {
         return ([statusText] + headerLines + ["", prettyBody]).joined(separator: "\n")
     }
 
-    var prettyHTTPText: String {
-        ([statusText] + headerLines + ["", prettyDisplayBody]).joined(separator: "\n")
-    }
-
     private var statusText: String {
         statusCode > 0 ? "HTTP/1.1 \(statusLine)" : "HTTP/1.1 0 Unknown"
     }
@@ -130,10 +126,6 @@ struct ResponseSnapshot: Codable, Equatable {
             }
     }
 
-    private var prettyDisplayBody: String {
-        PrettyJSONDisplayRenderer.renderBody(body) ?? prettyBody
-    }
-
     var prettyBody: String {
         guard
             let data = body.data(using: .utf8),
@@ -146,102 +138,6 @@ struct ResponseSnapshot: Codable, Equatable {
         }
 
         return pretty
-    }
-}
-
-private enum PrettyJSONDisplayRenderer {
-    static func renderBody(_ body: String) -> String? {
-        guard
-            let data = body.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data)
-        else {
-            return nil
-        }
-
-        return render(object, level: 0)
-    }
-
-    private static func render(_ value: Any, level: Int) -> String {
-        switch value {
-        case let dictionary as [String: Any]:
-            return renderDictionary(dictionary, level: level)
-        case let array as [Any]:
-            return renderArray(array, level: level)
-        case let string as String:
-            return renderString(string, continuationIndent: indent(level + 1))
-        case let number as NSNumber:
-            return renderNumber(number)
-        case _ as NSNull:
-            return "null"
-        default:
-            return renderString(String(describing: value), continuationIndent: indent(level + 1))
-        }
-    }
-
-    private static func renderDictionary(_ dictionary: [String: Any], level: Int) -> String {
-        guard !dictionary.isEmpty else { return "{}" }
-
-        let keyIndent = indent(level + 1)
-        let lines = dictionary.keys.sorted().map { key -> String in
-            let value = dictionary[key] ?? NSNull()
-            return "\(keyIndent)\"\(escape(key))\": \(render(value, level: level + 1))"
-        }
-
-        return "{\n\(lines.joined(separator: ",\n"))\n\(indent(level))}"
-    }
-
-    private static func renderArray(_ array: [Any], level: Int) -> String {
-        guard !array.isEmpty else { return "[]" }
-
-        let itemIndent = indent(level + 1)
-        let lines = array.map { "\(itemIndent)\(render($0, level: level + 1))" }
-        return "[\n\(lines.joined(separator: ",\n"))\n\(indent(level))]"
-    }
-
-    private static func renderString(_ value: String, continuationIndent: String) -> String {
-        let escaped = escape(value)
-        guard escaped.contains("\n") else {
-            return "\"\(escaped)\""
-        }
-
-        let lines = escaped
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-
-        return "\"" + lines.enumerated().map { index, line in
-            index == 0 ? line : "\(continuationIndent)\(line)"
-        }.joined(separator: "\n") + "\""
-    }
-
-    private static func renderNumber(_ number: NSNumber) -> String {
-        if CFGetTypeID(number) == CFBooleanGetTypeID() {
-            return number.boolValue ? "true" : "false"
-        }
-
-        return number.stringValue
-    }
-
-    private static func escape(_ value: String) -> String {
-        value.unicodeScalars.reduce(into: "") { output, scalar in
-            switch scalar {
-            case "\"":
-                output += "\\\""
-            case "\\":
-                output += "\\\\"
-            case "\n":
-                output += "\n"
-            case "\r":
-                output += "\\r"
-            case "\t":
-                output += "\\t"
-            default:
-                output.unicodeScalars.append(scalar)
-            }
-        }
-    }
-
-    private static func indent(_ level: Int) -> String {
-        String(repeating: "  ", count: level)
     }
 }
 
