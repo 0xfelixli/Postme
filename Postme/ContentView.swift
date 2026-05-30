@@ -926,8 +926,8 @@ private enum PostmeTheme {
     static let editor = Color(red: 0.989, green: 0.991, blue: 0.994)
     static let gutter = Color(red: 0.936, green: 0.942, blue: 0.948)
     static let separator = Color(red: 0.742, green: 0.766, blue: 0.790)
-    static let accent = Color(red: 0.560, green: 0.335, blue: 0.165)
-    static let accentSoft = Color(red: 0.560, green: 0.335, blue: 0.165).opacity(0.11)
+    static let accent = Color(red: 0.145, green: 0.365, blue: 0.690)
+    static let accentSoft = Color(red: 0.145, green: 0.365, blue: 0.690).opacity(0.11)
     static let success = Color(red: 0.130, green: 0.520, blue: 0.280)
     static let danger = Color(red: 0.700, green: 0.165, blue: 0.165)
     static let warning = Color(red: 0.760, green: 0.425, blue: 0.090)
@@ -1582,12 +1582,12 @@ private enum HTTPHighlighter {
         NSFont.monospacedSystemFont(ofSize: 12.5, weight: .semibold)
     }
 
-    private static let accentColor = NSColor(calibratedRed: 0.560, green: 0.335, blue: 0.165, alpha: 1)
+    private static let accentColor = NSColor(calibratedRed: 0.145, green: 0.365, blue: 0.690, alpha: 1)
     private static let successColor = NSColor(calibratedRed: 0.130, green: 0.520, blue: 0.280, alpha: 1)
     private static let warningColor = NSColor(calibratedRed: 0.760, green: 0.425, blue: 0.090, alpha: 1)
     private static let dangerColor = NSColor(calibratedRed: 0.700, green: 0.165, blue: 0.165, alpha: 1)
-    private static let protocolColor = NSColor(calibratedRed: 0.360, green: 0.330, blue: 0.390, alpha: 1)
-    private static let stringColor = NSColor(calibratedRed: 0.640, green: 0.375, blue: 0.125, alpha: 1)
+    private static let protocolColor = NSColor(calibratedRed: 0.285, green: 0.340, blue: 0.520, alpha: 1)
+    private static let stringColor = NSColor(calibratedRed: 0.215, green: 0.445, blue: 0.690, alpha: 1)
 
     private static var paragraphStyle: NSParagraphStyle {
         let style = NSMutableParagraphStyle()
@@ -1688,7 +1688,7 @@ private struct MethodBadge: View {
         case .delete:
             return PostmeTheme.danger
         case .head, .options:
-            return Color(red: 0.410, green: 0.330, blue: 0.640)
+            return Color(red: 0.285, green: 0.340, blue: 0.520)
         }
     }
 }
