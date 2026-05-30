@@ -176,17 +176,22 @@ enum RequestBuildError: LocalizedError, Equatable {
 }
 
 struct EnvironmentResolver {
-    let variables: [EnvironmentVariable]
+    private let replacements: [(dollar: String, mustache: String, value: String)]
+
+    init(variables: [EnvironmentVariable]) {
+        replacements = variables.compactMap { variable in
+            let key = variable.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard variable.isEnabled, !key.isEmpty else { return nil }
+            return (dollar: "$\(key)", mustache: "{{\(key)}}", value: variable.value)
+        }
+    }
 
     func resolve(_ value: String) -> String {
-        variables
-            .filter(\.isEnabled)
-            .reduce(value) { resolved, variable in
-                guard !variable.key.isEmpty else { return resolved }
-                return resolved
-                    .replacingOccurrences(of: "$\(variable.key)", with: variable.value)
-                    .replacingOccurrences(of: "{{\(variable.key)}}", with: variable.value)
-            }
+        replacements.reduce(value) { resolved, replacement in
+            resolved
+                .replacingOccurrences(of: replacement.dollar, with: replacement.value)
+                .replacingOccurrences(of: replacement.mustache, with: replacement.value)
+        }
     }
 }
 

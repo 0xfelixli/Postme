@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = PostmeStore()
     @State private var isCommandPalettePresented = false
     @State private var responseViewMode: ResponseViewMode = .raw
@@ -72,6 +73,11 @@ struct ContentView: View {
         }
         .onExitCommand {
             isCommandPalettePresented = false
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                store.flushPersistence()
+            }
         }
     }
 }
@@ -1218,25 +1224,40 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
         var parent: HighlightedHTTPTextView
         weak var textView: NSTextView?
         private var isApplying = false
+        private var highlightTask: Task<Void, Never>?
 
         init(_ parent: HighlightedHTTPTextView) {
             self.parent = parent
         }
 
+        deinit {
+            highlightTask?.cancel()
+        }
+
         func textDidChange(_ notification: Notification) {
             guard !isApplying, let textView else { return }
             parent.text = textView.string
-            rehighlight()
+            scheduleRehighlight()
         }
 
         func apply(_ value: String) {
             guard let textView else { return }
+            highlightTask?.cancel()
             let selectedRanges = textView.selectedRanges
             isApplying = true
             textView.textStorage?.setAttributedString(HTTPHighlighter.highlight(value))
             textView.typingAttributes = HTTPHighlighter.typingAttributes
             textView.selectedRanges = selectedRanges
             isApplying = false
+        }
+
+        private func scheduleRehighlight() {
+            highlightTask?.cancel()
+            highlightTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(90))
+                guard !Task.isCancelled else { return }
+                self?.rehighlight()
+            }
         }
 
         func rehighlight() {
@@ -1252,6 +1273,7 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
                 scrollView.reflectScrolledClipView(scrollView.contentView)
             }
             isApplying = false
+            highlightTask = nil
         }
     }
 }
