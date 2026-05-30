@@ -1565,45 +1565,64 @@ private enum HTTPHighlighter {
             ]
         )
 
+        var documentState = DocumentState.detectingStartLine
+
         text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
             let line = String(text[lineRange])
             let nsRange = NSRange(lineRange, in: text)
-            highlightLine(line, range: nsRange, in: attributed)
+            highlightLine(line, range: nsRange, state: &documentState, in: attributed)
         }
 
         return attributed
     }
 
-    private static func highlightLine(_ line: String, range: NSRange, in attributed: NSMutableAttributedString) {
+    private static func highlightLine(_ line: String, range: NSRange, state: inout DocumentState, in attributed: NSMutableAttributedString) {
         if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if state == .headers {
+                state = .body
+            }
             return
         }
 
-        if line.hasPrefix("HTTP/") {
-            highlightStatusLine(line, range: range, in: attributed)
-            return
-        }
+        switch state {
+        case .detectingStartLine:
+            if line.hasPrefix("HTTP/") {
+                highlightStatusLine(line, range: range, in: attributed)
+                state = .headers
+                return
+            }
 
-        if let methodRange = requestMethodRange(in: line) {
-            let nsMethodRange = NSRange(methodRange, in: line)
-            attributed.addAttributes(
-                [.foregroundColor: successColor, .font: boldFont],
-                range: NSRange(location: range.location + nsMethodRange.location, length: nsMethodRange.length)
-            )
-            highlightRequestLineParts(line, baseRange: range, methodRange: methodRange, in: attributed)
-            return
-        }
+            if let methodRange = requestMethodRange(in: line) {
+                let nsMethodRange = NSRange(methodRange, in: line)
+                attributed.addAttributes(
+                    [.foregroundColor: successColor, .font: boldFont],
+                    range: NSRange(location: range.location + nsMethodRange.location, length: nsMethodRange.length)
+                )
+                highlightRequestLineParts(line, baseRange: range, methodRange: methodRange, in: attributed)
+                state = .headers
+                return
+            }
 
-        if let colonIndex = line.firstIndex(of: ":") {
-            let keyLength = line.distance(from: line.startIndex, to: colonIndex)
-            let valueStart = line.index(after: colonIndex)
-            let valueOffset = valueStart.utf16Offset(in: line)
-            attributed.addAttributes([.foregroundColor: accentColor, .font: boldFont], range: NSRange(location: range.location, length: keyLength))
-            attributed.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: range.location + valueOffset, length: max(0, range.length - valueOffset)))
+            state = .body
+            highlightJSONFragments(line, baseRange: range, in: attributed)
             return
-        }
 
-        highlightJSONFragments(line, baseRange: range, in: attributed)
+        case .headers:
+            highlightHeaderLine(line, range: range, in: attributed)
+
+        case .body:
+            highlightJSONFragments(line, baseRange: range, in: attributed)
+        }
+    }
+
+    private static func highlightHeaderLine(_ line: String, range: NSRange, in attributed: NSMutableAttributedString) {
+        guard let colonIndex = line.firstIndex(of: ":") else { return }
+
+        let keyLength = line.distance(from: line.startIndex, to: colonIndex)
+        let valueStart = line.index(after: colonIndex)
+        let valueOffset = valueStart.utf16Offset(in: line)
+        attributed.addAttributes([.foregroundColor: accentColor, .font: boldFont], range: NSRange(location: range.location, length: keyLength))
+        attributed.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: range.location + valueOffset, length: max(0, range.length - valueOffset)))
     }
 
     private static func highlightStatusLine(_ line: String, range: NSRange, in attributed: NSMutableAttributedString) {
@@ -1661,6 +1680,12 @@ private enum HTTPHighlighter {
         return methods.compactMap { method in
             line.hasPrefix("\(method) ") ? line.startIndex..<line.index(line.startIndex, offsetBy: method.count) : nil
         }.first
+    }
+
+    private enum DocumentState {
+        case detectingStartLine
+        case headers
+        case body
     }
 
     private static var boldFont: NSFont {
