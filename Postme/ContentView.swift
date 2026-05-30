@@ -605,6 +605,7 @@ private struct ResponsePreviewView: View {
         .pickerStyle(.segmented)
         .controlSize(.small)
         .frame(width: 166)
+        .clickableHoverEffect()
     }
 
     private var emptyResponseSubtitle: String {
