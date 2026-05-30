@@ -5,6 +5,7 @@ import {
   Clock3,
   Code2,
   Copy,
+  Download,
   FileText,
   History,
   Monitor,
@@ -67,6 +68,9 @@ const shortcuts = [
   { key: "⇧ ⌘ L", label: "规范化 Header" },
 ]
 
+const downloadUrl =
+  "https://github.com/0xfelixli/Postme/releases/latest/download/Postme.dmg"
+
 function App() {
   return (
     <main className="min-h-[100dvh] bg-background text-foreground">
@@ -108,9 +112,9 @@ function SiteHeader() {
         </nav>
 
         <Button asChild size="sm" variant="outline">
-          <a href="https://github.com/0xfelixli/Postme">
-            <Code2 data-icon="inline-start" />
-            GitHub
+          <a href={downloadUrl}>
+            <Download data-icon="inline-start" />
+            下载
           </a>
         </Button>
       </div>
@@ -138,13 +142,16 @@ function HeroSection() {
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Button asChild size="lg">
-              <a href="https://github.com/0xfelixli/Postme">
-                查看源码
+              <a href={downloadUrl}>
+                下载 macOS 版
                 <ArrowRight data-icon="inline-end" />
               </a>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <a href="#protocol">看协议视图</a>
+              <a href="https://github.com/0xfelixli/Postme">
+                <Code2 data-icon="inline-start" />
+                GitHub
+              </a>
             </Button>
           </div>
         </div>
@@ -382,9 +389,9 @@ function FooterCta() {
           </div>
 
           <Button asChild>
-            <a href="https://github.com/0xfelixli/Postme">
-              <Code2 data-icon="inline-start" />
-              查看源码
+            <a href={downloadUrl}>
+              <Download data-icon="inline-start" />
+              下载 Postme.dmg
             </a>
           </Button>
         </div>
