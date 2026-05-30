@@ -1,8 +1,8 @@
 # Postme Site
 
-React product page for introducing Postme, the macOS raw HTTP repeater.
+用于介绍 Postme 的 React 产品页。Postme 是一个 macOS 原始 HTTP 重放器。
 
-## Stack
+## 技术栈
 
 - Bun
 - Vite
@@ -11,7 +11,7 @@ React product page for introducing Postme, the macOS raw HTTP repeater.
 - Tailwind CSS v4
 - shadcn/ui
 
-## Commands
+## 命令
 
 ```bash
 bun install
@@ -20,4 +20,4 @@ bun run lint
 bun run build
 ```
 
-The local dev server defaults to `http://127.0.0.1:5173/`.
+本地开发服务默认地址是 `http://127.0.0.1:5173/`。
