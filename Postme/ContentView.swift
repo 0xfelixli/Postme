@@ -110,7 +110,7 @@ private struct SidebarView: View {
                 .accessibilityLabel("New request")
                 .contentShape(Rectangle())
                 .keyboardShortcut("n", modifiers: .command)
-                .pointingHandCursor()
+                .clickableHoverEffect()
             }
             .padding(.horizontal, 10)
             .padding(.top, 5)
@@ -184,6 +184,7 @@ private struct HistoryListView: View {
                         HistoryEntryRow(entry: entry)
                     }
                     .buttonStyle(.plain)
+                    .clickableHoverEffect()
                     .padding(.vertical, 1)
                 }
             }
@@ -259,7 +260,7 @@ private struct EnvironmentEditorView: View {
                 }
                 .help("Add variable")
                 .accessibilityLabel("Add variable")
-                .pointingHandCursor()
+                .clickableHoverEffect()
             }
             .padding(.horizontal, 10)
 
@@ -320,6 +321,7 @@ private struct EnvironmentVariableRow: View {
                 .foregroundStyle(.secondary)
                 .help("Remove variable")
                 .accessibilityLabel("Remove variable")
+                .clickableHoverEffect()
             }
 
             TextField("value", text: $variable.value)
@@ -359,7 +361,7 @@ private struct RequestCommandBar: View {
                 .tint(PostmeTheme.accent)
                 .accessibilityLabel(store.isSending ? "Sending" : "Send request")
                 .disabled(store.isSending || rawBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .pointingHandCursor(isEnabled: !store.isSending && !rawBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .clickableHoverEffect(isEnabled: !store.isSending && !rawBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
             HStack(spacing: 6) {
@@ -410,6 +412,7 @@ private struct RequestCommandBar: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
+                        .clickableHoverEffect()
                     }
                 }
                 .frame(width: 156)
@@ -762,6 +765,7 @@ private struct CommandPaletteView: View {
                             }
                             .buttonStyle(.plain)
                             .keyboardShortcut(.return, modifiers: [])
+                            .clickableHoverEffect()
                             .background(item.id == filteredItems.first?.id ? PostmeTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                         }
 
@@ -1022,7 +1026,7 @@ private struct SidebarModeRail: View {
                 }
                 .buttonStyle(.plain)
                 .help(mode.rawValue)
-                .pointingHandCursor()
+                .clickableHoverEffect()
             }
         }
         .padding(1.5)
@@ -1344,7 +1348,7 @@ private struct IconToolButton: View {
         }
         .help(help)
         .buttonStyle(PostmeIconButtonStyle())
-        .pointingHandCursor()
+        .clickableHoverEffect()
     }
 }
 
@@ -1879,24 +1883,47 @@ private struct RawSurfaceStyleModifier: ViewModifier {
     }
 }
 
-private struct PointingHandCursorModifier: ViewModifier {
+private struct ClickableHoverEffectModifier: ViewModifier {
+    @Environment(\.isEnabled) private var environmentEnabled
+    @State private var isHovering = false
+    @State private var isCursorActive = false
     var isEnabled = true
 
+    private var isActive: Bool {
+        isHovering && isEnabled && environmentEnabled
+    }
+
     func body(content: Content) -> some View {
-        content.onHover { isHovering in
-            guard isEnabled else { return }
-            if isHovering {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
+        content
+            .shadow(color: isActive ? Color.black.opacity(0.16) : .clear, radius: isActive ? 5 : 0, x: 0, y: isActive ? 2 : 0)
+            .scaleEffect(isActive ? 1.012 : 1)
+            .animation(.easeOut(duration: 0.14), value: isActive)
+            .onHover { isHovering in
+                self.isHovering = isHovering
+                updateCursor(isHovering && isEnabled && environmentEnabled)
             }
+            .onChange(of: isEnabled && environmentEnabled) { _, canInteract in
+                updateCursor(isHovering && canInteract)
+            }
+            .onDisappear {
+                updateCursor(false)
+            }
+    }
+
+    private func updateCursor(_ shouldActivate: Bool) {
+        guard shouldActivate != isCursorActive else { return }
+        if shouldActivate {
+            NSCursor.pointingHand.push()
+        } else {
+            NSCursor.pop()
         }
+        isCursorActive = shouldActivate
     }
 }
 
 private extension View {
-    func pointingHandCursor(isEnabled: Bool = true) -> some View {
-        modifier(PointingHandCursorModifier(isEnabled: isEnabled))
+    func clickableHoverEffect(isEnabled: Bool = true) -> some View {
+        modifier(ClickableHoverEffectModifier(isEnabled: isEnabled))
     }
 
     func rawEditorStyle() -> some View {
