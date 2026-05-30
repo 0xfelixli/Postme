@@ -22,7 +22,7 @@ struct ContentView: View {
                             response: store.response,
                             errorMessage: store.errorMessage,
                             isSending: store.isSending,
-                            responseViewMode: $responseViewMode,
+                            responseViewMode: responseViewMode,
                             responseSearchText: $responseSearchText
                         )
                         .frame(height: PostmeLayout.requestToolbarHeight)
@@ -338,7 +338,7 @@ private struct RequestCommandBar: View {
     var response: ResponseSnapshot?
     var errorMessage: String?
     var isSending: Bool
-    @Binding var responseViewMode: ResponseViewMode
+    let responseViewMode: ResponseViewMode
     @Binding var responseSearchText: String
 
     var body: some View {
@@ -428,22 +428,6 @@ private struct RequestCommandBar: View {
                 }
                 .disabled(response == nil)
                 .opacity(response == nil ? 0.45 : 1)
-
-                HStack(spacing: 6) {
-                    Text("Mode")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    Picker("", selection: $responseViewMode) {
-                        ForEach(ResponseViewMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 166)
-                }
             }
         }
         .controlSize(.small)
@@ -583,23 +567,41 @@ private struct ResponsePreviewView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let errorMessage {
-                RawPane(title: "Request Failed", subtitle: "Transport or protocol error", systemImage: "exclamationmark.triangle", accent: PostmeTheme.danger) {
+                RawPane(title: "Request Failed", subtitle: "Transport or protocol error", systemImage: "exclamationmark.triangle", accent: PostmeTheme.danger, accessory: {
+                    responseModePicker
+                }) {
                     ErrorResponseSurface(message: errorMessage)
                 }
                 .padding(PostmeLayout.panePadding)
             } else if let response {
-                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle(for: response), systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode)) {
+                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle(for: response), systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode), accessory: {
+                    responseModePicker
+                }) {
                     RawResponseSurface(text: displayText(for: response))
                 }
                 .padding(PostmeLayout.panePadding)
             } else {
-                RawPane(title: "Response", subtitle: emptyResponseSubtitle, systemImage: "doc.plaintext", accent: .secondary) {
+                RawPane(title: "Response", subtitle: emptyResponseSubtitle, systemImage: "doc.plaintext", accent: .secondary, accessory: {
+                    responseModePicker
+                }) {
                     EmptyResponseSurface()
                 }
                 .padding(PostmeLayout.panePadding)
             }
         }
         .background(PostmeTheme.window)
+    }
+
+    private var responseModePicker: some View {
+        Picker("", selection: $viewMode) {
+            ForEach(ResponseViewMode.allCases) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .frame(width: 166)
     }
 
     private var emptyResponseSubtitle: String {
@@ -1149,16 +1151,35 @@ private struct StatusDot: View {
 }
 
 
-private struct RawPane<Content: View>: View {
+private struct RawPane<Accessory: View, Content: View>: View {
     let title: String
     let subtitle: String
     let systemImage: String
     var accent: Color = PostmeTheme.accent
-    @ViewBuilder var content: Content
+    let accessory: Accessory
+    let content: Content
+
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        accent: Color = PostmeTheme.accent,
+        @ViewBuilder accessory: () -> Accessory,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.accent = accent
+        self.accessory = accessory()
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PaneHeader(title: title, subtitle: subtitle, systemImage: systemImage, accent: accent)
+            PaneHeader(title: title, subtitle: subtitle, systemImage: systemImage, accent: accent) {
+                accessory
+            }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1166,11 +1187,45 @@ private struct RawPane<Content: View>: View {
     }
 }
 
-private struct PaneHeader: View {
+private extension RawPane where Accessory == EmptyView {
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        accent: Color = PostmeTheme.accent,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            accent: accent,
+            accessory: { EmptyView() },
+            content: content
+        )
+    }
+}
+
+private struct PaneHeader<Accessory: View>: View {
     let title: String
     let subtitle: String
     let systemImage: String
     let accent: Color
+    let accessory: Accessory
+
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        accent: Color,
+        @ViewBuilder accessory: () -> Accessory
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.accent = accent
+        self.accessory = accessory()
+    }
 
     var body: some View {
         HStack(spacing: 9) {
@@ -1188,6 +1243,7 @@ private struct PaneHeader: View {
                     .lineLimit(1)
             }
             Spacer()
+            accessory
         }
     }
 }
