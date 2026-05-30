@@ -624,7 +624,7 @@ private struct ResponsePreviewView: View {
         case .raw:
             return response.rawHTTPText
         case .pretty:
-            return response.prettyBody
+            return response.prettyHTTPText
         case .hex:
             return response.rawHTTPText.hexDump()
         }
@@ -641,7 +641,7 @@ private struct ResponsePreviewView: View {
         case .raw:
             return "Raw response"
         case .pretty:
-            return "Pretty body"
+            return "Pretty response"
         case .hex:
             return "Hex dump"
         }
@@ -660,7 +660,7 @@ private struct ResponsePreviewView: View {
         case .raw:
             return "Socket bytes rendered as HTTP"
         case .pretty:
-            return "Formatted response body"
+            return "Complete HTTP response with formatted body"
         case .hex:
             return "Raw response bytes as hexadecimal"
         }
