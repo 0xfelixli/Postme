@@ -169,34 +169,19 @@ private struct HistoryListView: View {
     var body: some View {
         List {
             if store.history.isEmpty {
-                Text("No history yet")
-                    .foregroundStyle(.secondary)
+                SidebarEmptyState(
+                    systemImage: "clock.badge.questionmark",
+                    title: "No history yet",
+                    subtitle: "Sent requests will appear here with status, timing, and errors."
+                )
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             } else {
                 ForEach(store.history) { entry in
                     Button {
                         store.loadHistory(entry)
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                MethodBadge(method: entry.request.method)
-                                Text(entry.request.url)
-                                    .lineLimit(1)
-                                Spacer()
-                            }
-                            HStack {
-                                if let response = entry.response {
-                                    Text(response.statusLine)
-                                        .foregroundStyle(response.statusCode < 400 ? PostmeTheme.success : PostmeTheme.danger)
-                                } else {
-                                    Text("Failed")
-                                        .foregroundStyle(PostmeTheme.danger)
-                                }
-                                Text(entry.sentAt, style: .relative)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.caption2)
-                        }
-                        .contentShape(Rectangle())
+                        HistoryEntryRow(entry: entry)
                     }
                     .buttonStyle(.plain)
                     .padding(.vertical, 1)
@@ -208,53 +193,142 @@ private struct HistoryListView: View {
     }
 }
 
+private struct HistoryEntryRow: View {
+    let entry: HistoryEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                MethodBadge(method: entry.request.method)
+                Text(entry.request.url)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+            }
+
+            HStack(spacing: 6) {
+                StatusDot(color: statusColor)
+                Text(statusText)
+                    .foregroundStyle(statusColor)
+                    .lineLimit(1)
+                Text(entry.sentAt, style: .relative)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .font(.caption2.weight(.medium))
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    private var statusText: String {
+        if let response = entry.response {
+            return response.statusLine
+        }
+        return entry.errorMessage ?? "Failed"
+    }
+
+    private var statusColor: Color {
+        if let response = entry.response {
+            return HTTPStatusTone.color(for: response.statusCode)
+        }
+        return PostmeTheme.danger
+    }
+}
+
 private struct EnvironmentEditorView: View {
     @ObservedObject var store: PostmeStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Environment")
-                    .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Environment")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Reusable values for raw requests")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
+
                 Button {
                     store.addVariable()
                 } label: {
                     Image(systemName: "plus")
                 }
                 .help("Add variable")
+                .accessibilityLabel("Add variable")
+                .pointingHandCursor()
             }
             .padding(.horizontal, 10)
 
             List {
-                ForEach($store.variables) { $variable in
-                    HStack(spacing: 6) {
-                        Toggle("", isOn: $variable.isEnabled)
-                            .labelsHidden()
-                        TextField("key", text: $variable.key)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("value", text: $variable.value)
-                            .textFieldStyle(.roundedBorder)
-                        Button {
+                if store.variables.isEmpty {
+                    SidebarEmptyState(
+                        systemImage: "curlybraces.square",
+                        title: "No variables",
+                        subtitle: "Add values like baseUrl, token, or workspace ids."
+                    )
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                } else {
+                    ForEach($store.variables) { $variable in
+                        EnvironmentVariableRow(variable: $variable) {
                             store.removeVariable(variable.id)
-                        } label: {
-                            Image(systemName: "trash")
                         }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 1)
                 }
             }
             .scrollContentBackground(.hidden)
 
-            Text("Use variables as $baseUrl in raw requests.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 4)
+            HStack(spacing: 6) {
+                Image(systemName: "text.badge.checkmark")
+                    .foregroundStyle(PostmeTheme.accent)
+                Text("Use variables as $baseUrl or {{baseUrl}} in raw requests.")
+                    .lineLimit(2)
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 5)
         }
         .padding(.top, 2)
+    }
+}
+
+private struct EnvironmentVariableRow: View {
+    @Binding var variable: EnvironmentVariable
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Toggle("", isOn: $variable.isEnabled)
+                    .labelsHidden()
+                    .help(variable.isEnabled ? "Variable enabled" : "Variable disabled")
+
+                TextField("key", text: $variable.key)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .disabled(!variable.isEnabled)
+
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Remove variable")
+                .accessibilityLabel("Remove variable")
+            }
+
+            TextField("value", text: $variable.value)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .disabled(!variable.isEnabled)
+        }
+        .padding(.vertical, 4)
+        .opacity(variable.isEnabled ? 1 : 0.52)
     }
 }
 
@@ -485,7 +559,7 @@ private struct ResponsePreviewView: View {
                 }
                 .padding(PostmeLayout.panePadding)
             } else if let response {
-                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle, systemImage: "doc.plaintext", accent: response.statusCode < 400 ? PostmeTheme.success : PostmeTheme.danger) {
+                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle(for: response), systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode)) {
                     RawResponseSurface(text: displayText(for: response))
                 }
                 .padding(PostmeLayout.panePadding)
@@ -506,23 +580,29 @@ private struct ResponsePreviewView: View {
     }
 
     private func displayText(for response: ResponseSnapshot) -> String {
-        let value: String
-        switch viewMode {
-        case .raw:
-            value = response.rawHTTPText
-        case .pretty:
-            value = response.prettyBody
-        case .hex:
-            value = response.rawHTTPText.hexDump()
-        }
-
+        let value = baseDisplayText(for: response)
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSearch.isEmpty else { return value }
 
-        return value
+        let matches = matchingLines(in: value, query: trimmedSearch)
+        return matches.isEmpty ? "No response lines match \"\(trimmedSearch)\"." : matches.joined(separator: "\n")
+    }
+
+    private func baseDisplayText(for response: ResponseSnapshot) -> String {
+        switch viewMode {
+        case .raw:
+            return response.rawHTTPText
+        case .pretty:
+            return response.prettyBody
+        case .hex:
+            return response.rawHTTPText.hexDump()
+        }
+    }
+
+    private func matchingLines(in value: String, query: String) -> [String.SubSequence] {
+        value
             .split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { $0.localizedCaseInsensitiveContains(trimmedSearch) }
-            .joined(separator: "\n")
+            .filter { $0.localizedCaseInsensitiveContains(query) }
     }
 
     private var responsePaneTitle: String {
@@ -536,7 +616,15 @@ private struct ResponsePreviewView: View {
         }
     }
 
-    private var responsePaneSubtitle: String {
+    private func responsePaneSubtitle(for response: ResponseSnapshot) -> String {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSearch.isEmpty {
+            let count = matchingLines(in: baseDisplayText(for: response), query: trimmedSearch).count
+            return count == 1
+                ? "1 matching line for \"\(trimmedSearch)\""
+                : "\(count) matching lines for \"\(trimmedSearch)\""
+        }
+
         switch viewMode {
         case .raw:
             return "Socket bytes rendered as HTTP"
@@ -845,6 +933,22 @@ private enum PostmeTheme {
     static let warning = Color(red: 0.760, green: 0.425, blue: 0.090)
 }
 
+
+private enum HTTPStatusTone {
+    static func color(for statusCode: Int) -> Color {
+        switch statusCode {
+        case 200..<300:
+            return PostmeTheme.success
+        case 300..<400:
+            return PostmeTheme.warning
+        case 400...:
+            return PostmeTheme.danger
+        default:
+            return .secondary
+        }
+    }
+}
+
 private enum PostmeLayout {
     static let requestToolbarHeight: CGFloat = 88
     static let panePadding: CGFloat = 12
@@ -970,6 +1074,52 @@ private struct SidebarRequestRow: View {
     }
 }
 
+private struct SidebarEmptyState: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(PostmeTheme.accent)
+                .frame(width: 32, height: 32)
+                .background(PostmeTheme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+
+            Text(title)
+                .font(.caption.weight(.semibold))
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PostmeTheme.window.opacity(0.54), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(PostmeTheme.separator.opacity(0.28))
+        }
+    }
+}
+
+private struct StatusDot: View {
+    let color: Color
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+            .overlay {
+                Circle()
+                    .stroke(Color.white.opacity(0.70), lineWidth: 1)
+            }
+    }
+}
+
+
 private struct RawPane<Content: View>: View {
     let title: String
     let subtitle: String
@@ -1077,7 +1227,7 @@ private struct ResponseStatusPill: View {
     }
 
     private var color: Color {
-        response.statusCode < 400 ? PostmeTheme.success : PostmeTheme.danger
+        HTTPStatusTone.color(for: response.statusCode)
     }
 }
 
