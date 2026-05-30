@@ -519,11 +519,6 @@ private struct RequestEditorView: View {
         VStack(spacing: 0) {
             RawPane(title: "Request", subtitle: "Edit request line, headers, blank line, and body directly", systemImage: "doc.plaintext") {
                 RawRequestEditor(text: rawBinding)
-                    .onAppear {
-                        if request.rawRequest?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-                            request.rawRequest = store.ensureRawRequest(for: request)
-                        }
-                    }
             }
             .padding(PostmeLayout.panePadding)
         }
@@ -575,16 +570,7 @@ private struct ResponsePreviewView: View {
     }
 
     private var responseModePicker: some View {
-        Picker("", selection: $viewMode) {
-            ForEach(ResponseViewMode.allCases) { mode in
-                Text(mode.rawValue).tag(mode)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .controlSize(.small)
-        .frame(width: 166)
-        .clickableHoverEffect()
+        ResponseModeSelector(selection: $viewMode)
     }
 
     private var emptyResponseSubtitle: String {
@@ -628,6 +614,58 @@ private enum ResponseViewMode: String, CaseIterable, Identifiable {
     case hex = "Hex"
 
     var id: String { rawValue }
+}
+
+private struct ResponseModeSelector: View {
+    @Binding var selection: ResponseViewMode
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ResponseViewMode.allCases) { mode in
+                ResponseModeButton(mode: mode, isSelected: selection == mode) {
+                    selection = mode
+                }
+            }
+        }
+        .padding(2)
+        .frame(width: 166, height: 30)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(PostmeTheme.separator.opacity(0.35))
+        }
+    }
+}
+
+private struct ResponseModeButton: View {
+    let mode: ResponseViewMode
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(mode.rawValue)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .frame(height: 24)
+                .foregroundStyle(foregroundStyle)
+                .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityLabel(mode.rawValue)
+        .accessibilityValue(isSelected ? "Selected" : "")
+        .clickableHoverEffect()
+    }
+
+    private var foregroundStyle: Color {
+        isSelected ? Color.white : Color.primary
+    }
+
+    private var backgroundStyle: Color {
+        isSelected ? PostmeTheme.accent : Color.clear
+    }
 }
 
 private enum ResponseDisplayFormatter {
