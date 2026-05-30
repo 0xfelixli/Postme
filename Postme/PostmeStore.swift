@@ -4,13 +4,13 @@ import Combine
 @MainActor
 final class PostmeStore: ObservableObject {
     @Published var requests: [APIRequest] {
-        didSet { save() }
+        didSet { scheduleSave() }
     }
     @Published var history: [HistoryEntry] {
-        didSet { save() }
+        didSet { scheduleSave() }
     }
     @Published var variables: [EnvironmentVariable] {
-        didSet { save() }
+        didSet { scheduleSave() }
     }
     @Published var selectedRequestID: APIRequest.ID?
     @Published var sidebarMode: SidebarMode = .collection
@@ -21,6 +21,8 @@ final class PostmeStore: ObservableObject {
     private let runner = RequestRunner()
     private let rawCodec = RawHTTPRequestCodec()
     private let persistenceKey = "postme.workspace.v1"
+    private let historyLimit = 100
+    private var saveTask: Task<Void, Never>?
 
     init() {
         if let workspace = Self.loadWorkspace(key: persistenceKey) {
@@ -28,8 +30,8 @@ final class PostmeStore: ObservableObject {
             requests = migrated.requests
             history = migrated.history
             variables = migrated.variables
-            selectedRequestID = workspace.requests.first?.id
-            save()
+            selectedRequestID = migrated.requests.first?.id
+            saveImmediately()
         } else {
             requests = [.sample]
             history = []
@@ -40,19 +42,24 @@ final class PostmeStore: ObservableObject {
         }
     }
 
+    deinit {
+        saveTask?.cancel()
+    }
+
     var selectedRequest: APIRequest? {
         guard let selectedRequestID else { return nil }
-        return requests.first { $0.id == selectedRequestID }
+        return request(matching: selectedRequestID)
     }
 
     func bindingForSelectedRequest() -> BindingBox<APIRequest>? {
-        guard let selectedRequestID, let index = requests.firstIndex(where: { $0.id == selectedRequestID }) else {
+        guard let selectedRequestID, let selectedRequest = request(matching: selectedRequestID) else {
             return nil
         }
 
         return BindingBox(
-            get: { self.requests[index] },
+            get: { self.request(matching: selectedRequestID) ?? selectedRequest },
             set: { request in
+                guard let index = self.indexOfRequest(matching: selectedRequestID) else { return }
                 self.requests[index] = request
                 self.requests[index].updatedAt = .now
             }
@@ -141,32 +148,26 @@ final class PostmeStore: ObservableObject {
     }
 
     func sendSelectedRequest() async {
-        guard let request = selectedRequest else { return }
+        guard !isSending, let request = selectedRequest else { return }
+        let requestID = request.id
         isSending = true
         errorMessage = nil
         response = nil
+        defer { isSending = false }
 
         do {
             let resolver = EnvironmentResolver(variables: variables)
             let normalizedRequest = try runner.normalizedRequest(from: request, resolver: resolver)
-            if let index = requests.firstIndex(where: { $0.id == request.id }) {
-                requests[index].method = normalizedRequest.method
-                requests[index].url = normalizedRequest.url
-                requests[index].headers = normalizedRequest.headers
-                requests[index].body = normalizedRequest.body
-                requests[index].updatedAt = .now
-            }
+            updateRequest(with: normalizedRequest, matching: requestID)
+
             let snapshot = try await runner.send(normalizedRequest, variables: variables)
             response = snapshot
-            history.insert(HistoryEntry(request: normalizedRequest, response: snapshot, errorMessage: nil, sentAt: .now), at: 0)
+            prependHistory(HistoryEntry(request: normalizedRequest, response: snapshot, errorMessage: nil, sentAt: .now))
         } catch {
             let message = error.localizedDescription
             errorMessage = message
-            history.insert(HistoryEntry(request: request, response: nil, errorMessage: message, sentAt: .now), at: 0)
+            prependHistory(HistoryEntry(request: request, response: nil, errorMessage: message, sentAt: .now))
         }
-
-        history = Array(history.prefix(100))
-        isSending = false
     }
 
     func ensureRawRequest(for request: APIRequest) -> String {
@@ -194,6 +195,10 @@ final class PostmeStore: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func flushPersistence() {
+        saveImmediately()
     }
 
     func prettyPrintSelectedJSONBody() {
@@ -233,7 +238,43 @@ final class PostmeStore: ObservableObject {
         }
     }
 
-    private func save() {
+    private func request(matching requestID: APIRequest.ID) -> APIRequest? {
+        guard let index = indexOfRequest(matching: requestID) else { return nil }
+        return requests[index]
+    }
+
+    private func indexOfRequest(matching requestID: APIRequest.ID) -> Array<APIRequest>.Index? {
+        requests.firstIndex { $0.id == requestID }
+    }
+
+    private func updateRequest(with normalizedRequest: APIRequest, matching requestID: APIRequest.ID) {
+        guard let index = indexOfRequest(matching: requestID) else { return }
+        requests[index].method = normalizedRequest.method
+        requests[index].url = normalizedRequest.url
+        requests[index].headers = normalizedRequest.headers
+        requests[index].body = normalizedRequest.body
+        requests[index].updatedAt = .now
+    }
+
+    private func prependHistory(_ entry: HistoryEntry) {
+        history.insert(entry, at: 0)
+        if history.count > historyLimit {
+            history.removeSubrange(historyLimit..<history.count)
+        }
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            self?.saveImmediately()
+        }
+    }
+
+    private func saveImmediately() {
+        saveTask?.cancel()
+        saveTask = nil
         let workspace = Workspace(requests: requests, history: history, variables: variables)
         guard let data = try? JSONEncoder.postme.encode(workspace) else { return }
         UserDefaults.standard.set(data, forKey: persistenceKey)
