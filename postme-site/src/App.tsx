@@ -71,7 +71,7 @@ const shortcuts = [
 
 const downloadUrl =
   "https://github.com/0xfelixli/Postme/releases/latest/download/Postme.dmg"
-const releaseUrl = "https://github.com/0xfelixli/Postme/releases/tag/v1.0"
+const releaseUrl = "https://github.com/0xfelixli/Postme/releases/tag/v1.0.1"
 const repoUrl = "https://github.com/0xfelixli/Postme"
 
 function App() {

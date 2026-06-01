@@ -688,52 +688,238 @@ private enum ResponseDisplayFormatter {
     }
 
     private static func prettyBody(for response: ResponseSnapshot) -> String {
-        guard
-            let data = response.body.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data)
-        else {
-            return response.body
-        }
-
-        return JSONDisplayRenderer.render(object)
+        response.prettyBody
     }
 }
 
-private enum JSONDisplayRenderer {
-    static func render(_ value: Any) -> String {
-        render(value, level: 0)
+enum OrderedJSON {
+    case object([(key: String, value: OrderedJSON)])
+    case array([OrderedJSON])
+    case string(String)
+    case number(String)
+    case bool(Bool)
+    case null
+}
+
+struct OrderedJSONParser {
+    private let text: String
+    private var index: String.Index
+
+    init(_ text: String) {
+        self.text = text
+        self.index = text.startIndex
     }
 
-    private static func render(_ value: Any, level: Int) -> String {
-        switch value {
-        case let dictionary as [String: Any]:
-            return renderDictionary(dictionary, level: level)
-        case let array as [Any]:
-            return renderArray(array, level: level)
-        case let string as String:
-            return renderString(string, continuationIndent: indent(level + 1))
-        case let number as NSNumber:
-            return renderNumber(number)
-        case _ as NSNull:
-            return "null"
+    mutating func parse() -> OrderedJSON? {
+        skipWhitespace()
+        guard let value = parseValue() else { return nil }
+        skipWhitespace()
+        return index == text.endIndex ? value : nil
+    }
+
+    private mutating func parseValue() -> OrderedJSON? {
+        skipWhitespace()
+        guard index < text.endIndex else { return nil }
+
+        switch text[index] {
+        case "{":
+            return parseObject()
+        case "[":
+            return parseArray()
+        case "\"":
+            return parseString().map(OrderedJSON.string)
+        case "t":
+            return consume("true") ? .bool(true) : nil
+        case "f":
+            return consume("false") ? .bool(false) : nil
+        case "n":
+            return consume("null") ? .null : nil
         default:
-            return renderString(String(describing: value), continuationIndent: indent(level + 1))
+            return parseNumber().map(OrderedJSON.number)
         }
     }
 
-    private static func renderDictionary(_ dictionary: [String: Any], level: Int) -> String {
-        guard !dictionary.isEmpty else { return "{}" }
+    private mutating func parseObject() -> OrderedJSON? {
+        guard consume("{") else { return nil }
+        skipWhitespace()
+        if consume("}") { return .object([]) }
+
+        var pairs: [(key: String, value: OrderedJSON)] = []
+        while true {
+            skipWhitespace()
+            guard let key = parseString() else { return nil }
+            skipWhitespace()
+            guard consume(":") else { return nil }
+            guard let value = parseValue() else { return nil }
+            pairs.append((key, value))
+            skipWhitespace()
+            if consume("}") { return .object(pairs) }
+            guard consume(",") else { return nil }
+        }
+    }
+
+    private mutating func parseArray() -> OrderedJSON? {
+        guard consume("[") else { return nil }
+        skipWhitespace()
+        if consume("]") { return .array([]) }
+
+        var values: [OrderedJSON] = []
+        while true {
+            guard let value = parseValue() else { return nil }
+            values.append(value)
+            skipWhitespace()
+            if consume("]") { return .array(values) }
+            guard consume(",") else { return nil }
+        }
+    }
+
+    private mutating func parseString() -> String? {
+        guard consume("\"") else { return nil }
+        var output = ""
+
+        while index < text.endIndex {
+            let character = text[index]
+            text.formIndex(after: &index)
+
+            if character == "\"" {
+                return output
+            }
+
+            guard character == "\\" else {
+                output.append(character)
+                continue
+            }
+
+            guard index < text.endIndex else { return nil }
+            let escaped = text[index]
+            text.formIndex(after: &index)
+            switch escaped {
+            case "\"", "\\", "/":
+                output.append(escaped)
+            case "b":
+                output.append("\u{8}")
+            case "f":
+                output.append("\u{c}")
+            case "n":
+                output.append("\n")
+            case "r":
+                output.append("\r")
+            case "t":
+                output.append("\t")
+            case "u":
+                guard let scalar = parseUnicodeScalar() else { return nil }
+                output.unicodeScalars.append(scalar)
+            default:
+                return nil
+            }
+        }
+
+        return nil
+    }
+
+    private mutating func parseUnicodeScalar() -> UnicodeScalar? {
+        var hex = ""
+        for _ in 0..<4 {
+            guard index < text.endIndex else { return nil }
+            hex.append(text[index])
+            text.formIndex(after: &index)
+        }
+        guard let value = UInt32(hex, radix: 16) else { return nil }
+        return UnicodeScalar(value)
+    }
+
+    private mutating func parseNumber() -> String? {
+        let start = index
+        if current == "-" {
+            text.formIndex(after: &index)
+        }
+
+        guard consumeDigits() else {
+            index = start
+            return nil
+        }
+
+        if current == "." {
+            text.formIndex(after: &index)
+            guard consumeDigits() else {
+                index = start
+                return nil
+            }
+        }
+
+        if current == "e" || current == "E" {
+            text.formIndex(after: &index)
+            if current == "+" || current == "-" {
+                text.formIndex(after: &index)
+            }
+            guard consumeDigits() else {
+                index = start
+                return nil
+            }
+        }
+
+        return String(text[start..<index])
+    }
+
+    private mutating func consumeDigits() -> Bool {
+        let start = index
+        while let current, current.isNumber {
+            text.formIndex(after: &index)
+        }
+        return index > start
+    }
+
+    private mutating func consume(_ token: String) -> Bool {
+        guard index < text.endIndex, text[index...].hasPrefix(token) else { return false }
+        index = text.index(index, offsetBy: token.count)
+        return true
+    }
+
+    private mutating func skipWhitespace() {
+        while let current, current.isWhitespace {
+            text.formIndex(after: &index)
+        }
+    }
+
+    private var current: Character? {
+        index < text.endIndex ? text[index] : nil
+    }
+}
+
+enum JSONDisplayRenderer {
+    static func render(_ value: OrderedJSON) -> String {
+        render(value, level: 0)
+    }
+
+    private static func render(_ value: OrderedJSON, level: Int) -> String {
+        switch value {
+        case .object(let pairs):
+            return renderObject(pairs, level: level)
+        case .array(let array):
+            return renderArray(array, level: level)
+        case .string(let string):
+            return renderString(string, continuationIndent: indent(level + 1))
+        case .number(let number):
+            return number
+        case .bool(let bool):
+            return bool ? "true" : "false"
+        case .null:
+            return "null"
+        }
+    }
+
+    private static func renderObject(_ pairs: [(key: String, value: OrderedJSON)], level: Int) -> String {
+        guard !pairs.isEmpty else { return "{}" }
 
         let keyIndent = indent(level + 1)
-        let lines = dictionary.keys.sorted().map { key -> String in
-            let value = dictionary[key] ?? NSNull()
+        let lines = pairs.map { key, value -> String in
             return "\(keyIndent)\"\(escape(key))\": \(render(value, level: level + 1))"
         }
 
         return "{\n\(lines.joined(separator: ",\n"))\n\(indent(level))}"
     }
 
-    private static func renderArray(_ array: [Any], level: Int) -> String {
+    private static func renderArray(_ array: [OrderedJSON], level: Int) -> String {
         guard !array.isEmpty else { return "[]" }
 
         let itemIndent = indent(level + 1)
@@ -754,14 +940,6 @@ private enum JSONDisplayRenderer {
         return "\"" + lines.enumerated().map { index, line in
             index == 0 ? line : "\(continuationIndent)\(line)"
         }.joined(separator: "\n") + "\""
-    }
-
-    private static func renderNumber(_ number: NSNumber) -> String {
-        if CFGetTypeID(number) == CFBooleanGetTypeID() {
-            return number.boolValue ? "true" : "false"
-        }
-
-        return number.stringValue
     }
 
     private static func escape(_ value: String) -> String {
@@ -795,6 +973,7 @@ private struct CommandPaletteView: View {
     @ObservedObject var store: PostmeStore
     @Binding var isPresented: Bool
     @State private var query = ""
+    @State private var selectedIndex = 0
     @FocusState private var isSearchFocused: Bool
 
     private var filteredItems: [CommandPaletteItem] {
@@ -809,99 +988,160 @@ private struct CommandPaletteView: View {
         }
     }
 
+    private var selectedItem: CommandPaletteItem? {
+        guard filteredItems.indices.contains(selectedIndex) else { return filteredItems.first }
+        return filteredItems[selectedIndex]
+    }
+
+    private var resultSummary: String {
+        let count = filteredItems.count
+        return count == 1 ? "1 result" : "\(count) results"
+    }
+
     var body: some View {
         ZStack {
-            Color.black.opacity(0.25)
+            Color.black.opacity(0.22)
                 .ignoresSafeArea()
                 .onTapGesture {
                     isPresented = false
                 }
 
             VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search commands, requests, history, variables", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.title3)
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            runFirstItem()
-                        }
-                        .onExitCommand {
-                            isPresented = false
-                        }
-                    Text("esc")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color(nsColor: .separatorColor).opacity(0.35), in: RoundedRectangle(cornerRadius: 4))
-                }
-                .padding(16)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "command")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(PostmeTheme.accent)
+                            .frame(width: 24, height: 24)
+                            .background(PostmeTheme.accentSoft, in: RoundedRectangle(cornerRadius: 7))
 
-                Divider()
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Command palette")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Text("Search requests, history, variables, and actions")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
 
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(filteredItems) { item in
+                        Spacer()
+
+                        CommandPaletteKeycap(text: "esc")
+                    }
+
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(PostmeTheme.accent)
+
+                        TextField("Type a command or request", text: $query)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 18, weight: .semibold))
+                            .focused($isSearchFocused)
+                            .onSubmit {
+                                runSelectedItem()
+                            }
+                            .onExitCommand {
+                                isPresented = false
+                            }
+
+                        if !query.isEmpty {
                             Button {
-                                run(item)
+                                query = ""
                             } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: item.systemImage)
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 24)
-
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(item.title)
-                                            .font(.callout.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(1)
-                                        Text(item.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-
-                                    Spacer()
-
-                                    Text(item.group)
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .contentShape(Rectangle())
-                                .animation(.easeInOut(duration: 0.18), value: filteredItems.first?.id)
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
                             }
                             .buttonStyle(.plain)
-                            .keyboardShortcut(.return, modifiers: [])
                             .clickableHoverEffect()
-                            .background(item.id == filteredItems.first?.id ? PostmeTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                            .accessibilityLabel("Clear search")
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 42)
+                    .background(PostmeTheme.raised, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(PostmeTheme.accent.opacity(isSearchFocused ? 0.42 : 0.18), lineWidth: isSearchFocused ? 1.5 : 1)
+                    }
+                }
+                .padding(14)
+
+                Rectangle()
+                    .fill(PostmeTheme.separator.opacity(0.42))
+                    .frame(height: 1)
+
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
+                            CommandPaletteRow(
+                                item: item,
+                                isSelected: index == selectedIndex,
+                                select: { selectedIndex = index },
+                                action: { run(item) }
+                            )
                         }
 
                         if filteredItems.isEmpty {
-                            ContentUnavailableView("No Commands", systemImage: "command", description: Text("Try another search."))
-                                .padding(.vertical, 34)
+                            CommandPaletteEmptyState(query: query)
+                                .padding(.vertical, 38)
                         }
                     }
-                    .padding(8)
+                    .padding(7)
                 }
-                .frame(maxHeight: 430)
+                .frame(height: 372)
+
+                Rectangle()
+                    .fill(PostmeTheme.separator.opacity(0.34))
+                    .frame(height: 1)
+
+                HStack(spacing: 8) {
+                    Text(resultSummary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    HStack(spacing: 5) {
+                        CommandPaletteKeycap(text: "↑↓")
+                        Text("navigate")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        CommandPaletteKeycap(text: "return")
+                        Text("run")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 36)
             }
-            .frame(minWidth: 620, idealWidth: 680, maxWidth: 760)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .frame(width: 650)
+            .background(PostmeTheme.window, in: RoundedRectangle(cornerRadius: 12))
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(nsColor: .separatorColor))
+                    .stroke(PostmeTheme.separator.opacity(0.58))
             }
-            .shadow(color: .black.opacity(0.24), radius: 30, y: 18)
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.55))
+                    .blendMode(.screen)
+            }
+            .shadow(color: Color(red: 0.05, green: 0.10, blue: 0.18).opacity(0.22), radius: 34, x: 0, y: 18)
             .accessibilityAddTraits(.isModal)
         }
         .onAppear {
             isSearchFocused = true
+        }
+        .onChange(of: query) { _, _ in
+            selectedIndex = 0
+        }
+        .onChange(of: filteredItems.count) { _, count in
+            selectedIndex = min(selectedIndex, max(0, count - 1))
+        }
+        .onMoveCommand { direction in
+            moveSelection(direction)
         }
     }
 
@@ -1017,8 +1257,8 @@ private struct CommandPaletteView: View {
         return items
     }
 
-    private func runFirstItem() {
-        guard let item = filteredItems.first else { return }
+    private func runSelectedItem() {
+        guard let item = selectedItem else { return }
         run(item)
     }
 
@@ -1026,16 +1266,162 @@ private struct CommandPaletteView: View {
         item.run()
         isPresented = false
     }
+
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        guard !filteredItems.isEmpty else {
+            selectedIndex = 0
+            return
+        }
+
+        switch direction {
+        case .up:
+            selectedIndex = max(0, selectedIndex - 1)
+        case .down:
+            selectedIndex = min(filteredItems.count - 1, selectedIndex + 1)
+        default:
+            break
+        }
+    }
 }
 
 private struct CommandPaletteItem: Identifiable {
-    let id = UUID()
+    let id: String
     let title: String
     let subtitle: String
     let group: String
     let systemImage: String
     let keywords: [String]
     let run: () -> Void
+
+    init(
+        id: String? = nil,
+        title: String,
+        subtitle: String,
+        group: String,
+        systemImage: String,
+        keywords: [String],
+        run: @escaping () -> Void
+    ) {
+        self.id = id ?? "\(group)-\(title)-\(subtitle)"
+        self.title = title
+        self.subtitle = subtitle
+        self.group = group
+        self.systemImage = systemImage
+        self.keywords = keywords
+        self.run = run
+    }
+}
+
+private struct CommandPaletteRow: View {
+    let item: CommandPaletteItem
+    let isSelected: Bool
+    let select: () -> Void
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: item.systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.white : PostmeTheme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(iconBackground, in: RoundedRectangle(cornerRadius: 7))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .lineLimit(1)
+                    Text(item.subtitle)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.76) : Color.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(item.group)
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.78) : PostmeTheme.accent)
+                    .padding(.horizontal, 7)
+                    .frame(height: 20)
+                    .background(groupBackground, in: RoundedRectangle(cornerRadius: 5))
+
+                if isSelected {
+                    CommandPaletteKeycap(text: "return", isSelected: true)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color.white.opacity(0.20) : Color.clear)
+        }
+        .onHover { isHovering in
+            if isHovering {
+                select()
+            }
+        }
+        .clickableHoverEffect()
+    }
+
+    private var rowBackground: Color {
+        isSelected ? PostmeTheme.accent : Color.clear
+    }
+
+    private var iconBackground: Color {
+        isSelected ? Color.white.opacity(0.16) : PostmeTheme.accentSoft
+    }
+
+    private var groupBackground: Color {
+        isSelected ? Color.white.opacity(0.14) : PostmeTheme.accentSoft
+    }
+}
+
+private struct CommandPaletteKeycap: View {
+    let text: String
+    var isSelected = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .bold, design: .rounded))
+            .foregroundStyle(isSelected ? Color.white.opacity(0.82) : Color.secondary)
+            .padding(.horizontal, 6)
+            .frame(height: 20)
+            .background(isSelected ? Color.white.opacity(0.13) : PostmeTheme.control, in: RoundedRectangle(cornerRadius: 5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(isSelected ? Color.white.opacity(0.18) : PostmeTheme.separator.opacity(0.34))
+            }
+    }
+}
+
+private struct CommandPaletteEmptyState: View {
+    let query: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "command.square")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(PostmeTheme.accent)
+                .frame(width: 48, height: 48)
+                .background(PostmeTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+
+            VStack(spacing: 3) {
+                Text("No matching command")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(query.isEmpty ? "Start typing to search the workspace." : "Try a request path, method, variable, or action name.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
 }
 
 private enum Clipboard {
@@ -1494,7 +1880,7 @@ private struct RawRequestEditor: View {
     var body: some View {
         HStack(spacing: 0) {
             EditorGutter(lineCount: lineCount)
-            HighlightedHTTPTextView(text: $text, isEditable: true, wrapsLines: false)
+            HighlightedHTTPTextView(text: $text, isEditable: true, allowsInsertionCursor: true, wrapsLines: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rawSurfaceStyle()
@@ -1509,7 +1895,7 @@ private struct RawResponseSurface: View {
     let text: String
 
     var body: some View {
-        HighlightedHTTPTextView(text: .constant(text), isEditable: false, wrapsLines: true)
+        HighlightedHTTPTextView(text: .constant(text), isEditable: false, allowsInsertionCursor: true, wrapsLines: true)
             .contextMenu {
                 Button("Copy All") {
                     NSPasteboard.general.clearContents()
@@ -1524,9 +1910,13 @@ private struct RawResponseSurface: View {
 private struct HighlightedHTTPTextView: NSViewRepresentable {
     @Binding var text: String
     let isEditable: Bool
+    let allowsInsertionCursor: Bool
     let wrapsLines: Bool
     private var layout: HighlightedTextLayout {
         wrapsLines ? .wrapped : .raw
+    }
+    private var textViewAllowsEditing: Bool {
+        isEditable || allowsInsertionCursor
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1545,7 +1935,7 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
 
         let textView = NSTextView()
         textView.delegate = context.coordinator
-        textView.isEditable = isEditable
+        textView.isEditable = textViewAllowsEditing
         textView.isSelectable = true
         textView.isRichText = false
         textView.importsGraphics = false
@@ -1575,7 +1965,7 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
         context.coordinator.parent = self
-        textView.isEditable = isEditable
+        textView.isEditable = textViewAllowsEditing
         applyLayout(to: textView, in: scrollView)
 
         if textView.string != text {
@@ -1610,9 +2000,13 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard !isApplying, let textView else { return }
+            guard !isApplying, parent.isEditable, let textView else { return }
             parent.text = textView.string
             scheduleRehighlight()
+        }
+
+        func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+            parent.isEditable
         }
 
         func apply(_ value: String) {
@@ -1706,20 +2100,40 @@ private enum HTTPHighlighter {
         )
 
         var documentState = DocumentState.detectingStartLine
+        var bodyStartLocation: Int?
 
-        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: [.byLines, .substringNotRequired]) { _, lineRange, enclosingRange, _ in
             let line = String(text[lineRange])
             let nsRange = NSRange(lineRange, in: text)
-            highlightLine(line, range: nsRange, state: &documentState, in: attributed)
+            let nsEnclosingRange = NSRange(enclosingRange, in: text)
+            highlightLine(line, range: nsRange, enclosingRange: nsEnclosingRange, state: &documentState, bodyStartLocation: &bodyStartLocation, in: attributed)
+        }
+
+        if text.isEmpty {
+            return attributed
+        }
+
+        if documentState == .body {
+            let startLocation = bodyStartLocation ?? 0
+            let bodyRange = NSRange(location: startLocation, length: max(0, (text as NSString).length - startLocation))
+            highlightBody(in: text, range: bodyRange, attributed: attributed)
         }
 
         return attributed
     }
 
-    private static func highlightLine(_ line: String, range: NSRange, state: inout DocumentState, in attributed: NSMutableAttributedString) {
+    private static func highlightLine(
+        _ line: String,
+        range: NSRange,
+        enclosingRange: NSRange,
+        state: inout DocumentState,
+        bodyStartLocation: inout Int?,
+        in attributed: NSMutableAttributedString
+    ) {
         if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if state == .headers {
                 state = .body
+                bodyStartLocation = enclosingRange.location + enclosingRange.length
             }
             return
         }
@@ -1744,25 +2158,33 @@ private enum HTTPHighlighter {
             }
 
             state = .body
-            highlightJSONFragments(line, baseRange: range, in: attributed)
+            bodyStartLocation = range.location
             return
 
         case .headers:
             highlightHeaderLine(line, range: range, in: attributed)
 
         case .body:
-            highlightJSONFragments(line, baseRange: range, in: attributed)
+            if bodyStartLocation == nil {
+                bodyStartLocation = range.location
+            }
         }
     }
 
     private static func highlightHeaderLine(_ line: String, range: NSRange, in attributed: NSMutableAttributedString) {
+        if line.first?.isWhitespace == true {
+            attributed.addAttribute(.foregroundColor, value: headerValueColor, range: range)
+            return
+        }
+
         guard let colonIndex = line.firstIndex(of: ":") else { return }
 
         let keyLength = line.distance(from: line.startIndex, to: colonIndex)
         let valueStart = line.index(after: colonIndex)
         let valueOffset = valueStart.utf16Offset(in: line)
-        attributed.addAttributes([.foregroundColor: accentColor, .font: boldFont], range: NSRange(location: range.location, length: keyLength))
-        attributed.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: range.location + valueOffset, length: max(0, range.length - valueOffset)))
+        attributed.addAttributes([.foregroundColor: headerNameColor, .font: boldFont], range: NSRange(location: range.location, length: keyLength))
+        attributed.addAttribute(.foregroundColor, value: punctuationColor, range: NSRange(location: range.location + keyLength, length: 1))
+        attributed.addAttribute(.foregroundColor, value: headerValueColor, range: NSRange(location: range.location + valueOffset, length: max(0, range.length - valueOffset)))
     }
 
     private static func highlightStatusLine(_ line: String, range: NSRange, in attributed: NSMutableAttributedString) {
@@ -1781,38 +2203,204 @@ private enum HTTPHighlighter {
         guard let path = parts.first, let pathRange = line.range(of: String(path), range: methodRange.upperBound..<line.endIndex) else { return }
         let nsPathRange = NSRange(pathRange, in: line)
         attributed.addAttribute(.foregroundColor, value: accentColor, range: NSRange(location: baseRange.location + nsPathRange.location, length: nsPathRange.length))
+        highlightQueryParameters(in: line, targetRange: pathRange, baseRange: baseRange, attributed: attributed)
 
         guard parts.count > 1, let versionRange = line.range(of: String(parts[1]), range: pathRange.upperBound..<line.endIndex) else { return }
         let nsVersionRange = NSRange(versionRange, in: line)
         attributed.addAttribute(.foregroundColor, value: protocolColor, range: NSRange(location: baseRange.location + nsVersionRange.location, length: nsVersionRange.length))
     }
 
-    private static func highlightJSONFragments(_ line: String, baseRange: NSRange, in attributed: NSMutableAttributedString) {
-        var index = line.startIndex
-        while index < line.endIndex, let quoteStart = line[index...].firstIndex(of: "\"") {
-            var scanIndex = line.index(after: quoteStart)
-            var quoteEnd: String.Index?
-            var isEscaped = false
+    private static func highlightQueryParameters(in line: String, targetRange: Range<String.Index>, baseRange: NSRange, attributed: NSMutableAttributedString) {
+        guard let queryStart = line[targetRange].firstIndex(of: "?") else { return }
+        var cursor = line.index(after: queryStart)
 
-            while scanIndex < line.endIndex {
-                let character = line[scanIndex]
-                if character == "\\" {
-                    isEscaped.toggle()
-                } else {
+        while cursor < targetRange.upperBound {
+            let nameStart = cursor
+            while cursor < targetRange.upperBound, line[cursor] != "=", line[cursor] != "&" {
+                cursor = line.index(after: cursor)
+            }
+
+            if cursor > nameStart {
+                let nameRange = NSRange(nameStart..<cursor, in: line)
+                attributed.addAttributes([.foregroundColor: parameterNameColor, .font: boldFont], range: NSRange(location: baseRange.location + nameRange.location, length: nameRange.length))
+            }
+
+            if cursor < targetRange.upperBound, line[cursor] == "=" {
+                let equalsRange = NSRange(cursor..<line.index(after: cursor), in: line)
+                attributed.addAttribute(.foregroundColor, value: punctuationColor, range: NSRange(location: baseRange.location + equalsRange.location, length: equalsRange.length))
+                cursor = line.index(after: cursor)
+            }
+
+            let valueStart = cursor
+            while cursor < targetRange.upperBound, line[cursor] != "&" {
+                cursor = line.index(after: cursor)
+            }
+
+            if cursor > valueStart {
+                let valueRange = NSRange(valueStart..<cursor, in: line)
+                attributed.addAttribute(.foregroundColor, value: stringColor, range: NSRange(location: baseRange.location + valueRange.location, length: valueRange.length))
+            }
+
+            if cursor < targetRange.upperBound, line[cursor] == "&" {
+                let ampersandRange = NSRange(cursor..<line.index(after: cursor), in: line)
+                attributed.addAttribute(.foregroundColor, value: punctuationColor, range: NSRange(location: baseRange.location + ampersandRange.location, length: ampersandRange.length))
+                cursor = line.index(after: cursor)
+            }
+        }
+    }
+
+    private static func highlightBody(in text: String, range: NSRange, attributed: NSMutableAttributedString) {
+        guard range.length > 0, let swiftRange = Range(range, in: text) else { return }
+        let body = text[swiftRange]
+        let firstToken = body.first { !$0.isWhitespace }
+        if firstToken == "{" || firstToken == "[" {
+            highlightJSON(in: text, range: range, attributed: attributed)
+            return
+        }
+
+        if body.contains("="), body.contains("&") {
+            highlightFormBody(in: text, range: range, attributed: attributed)
+            return
+        }
+
+        if firstToken == "<" {
+            highlightXMLBody(in: text, range: range, attributed: attributed)
+        }
+    }
+
+    private static func highlightJSON(in text: String, range: NSRange, attributed: NSMutableAttributedString) {
+        guard let swiftRange = Range(range, in: text) else { return }
+        var index = swiftRange.lowerBound
+
+        while index < swiftRange.upperBound {
+            let character = text[index]
+
+            if character == "\"" {
+                let stringStart = index
+                index = text.index(after: index)
+                var isEscaped = false
+
+                while index < swiftRange.upperBound {
+                    let character = text[index]
+                    let next = text.index(after: index)
+                    if character == "\\", !isEscaped {
+                        isEscaped = true
+                        index = next
+                        continue
+                    }
                     if character == "\"", !isEscaped {
-                        quoteEnd = scanIndex
+                        index = next
                         break
                     }
                     isEscaped = false
+                    index = next
                 }
-                scanIndex = line.index(after: scanIndex)
+
+                let stringRange = NSRange(stringStart..<index, in: text)
+                let color = isJSONStringKey(after: index, upperBound: swiftRange.upperBound, in: text) ? parameterNameColor : stringColor
+                attributed.addAttribute(.foregroundColor, value: color, range: stringRange)
+                if color == parameterNameColor {
+                    attributed.addAttribute(.font, value: boldFont, range: stringRange)
+                }
+                continue
             }
 
-            guard let quoteEnd else { break }
-            let nsRange = NSRange(quoteStart...quoteEnd, in: line)
-            attributed.addAttribute(.foregroundColor, value: stringColor, range: NSRange(location: baseRange.location + nsRange.location, length: nsRange.length))
-            index = line.index(after: quoteEnd)
+            if character.isNumber || character == "-" {
+                let start = index
+                index = text.index(after: index)
+                while index < swiftRange.upperBound, isJSONNumberCharacter(text[index]) {
+                    index = text.index(after: index)
+                }
+                attributed.addAttribute(.foregroundColor, value: numberColor, range: NSRange(start..<index, in: text))
+                continue
+            }
+
+            if let tokenRange = jsonLiteralRange(at: index, upperBound: swiftRange.upperBound, in: text) {
+                attributed.addAttributes([.foregroundColor: keywordColor, .font: boldFont], range: NSRange(tokenRange, in: text))
+                index = tokenRange.upperBound
+                continue
+            }
+
+            if "{}[],:".contains(character) {
+                attributed.addAttribute(.foregroundColor, value: punctuationColor, range: NSRange(index..<text.index(after: index), in: text))
+            }
+
+            index = text.index(after: index)
         }
+    }
+
+    private static func highlightFormBody(in text: String, range: NSRange, attributed: NSMutableAttributedString) {
+        guard let swiftRange = Range(range, in: text) else { return }
+        var cursor = swiftRange.lowerBound
+
+        while cursor < swiftRange.upperBound {
+            let nameStart = cursor
+            while cursor < swiftRange.upperBound, text[cursor] != "=", text[cursor] != "&", text[cursor] != "\n" {
+                cursor = text.index(after: cursor)
+            }
+
+            if cursor > nameStart {
+                attributed.addAttributes([.foregroundColor: parameterNameColor, .font: boldFont], range: NSRange(nameStart..<cursor, in: text))
+            }
+
+            if cursor < swiftRange.upperBound, text[cursor] == "=" {
+                attributed.addAttribute(.foregroundColor, value: punctuationColor, range: NSRange(cursor..<text.index(after: cursor), in: text))
+                cursor = text.index(after: cursor)
+            }
+
+            let valueStart = cursor
+            while cursor < swiftRange.upperBound, text[cursor] != "&", text[cursor] != "\n" {
+                cursor = text.index(after: cursor)
+            }
+
+            if cursor > valueStart {
+                attributed.addAttribute(.foregroundColor, value: stringColor, range: NSRange(valueStart..<cursor, in: text))
+            }
+
+            if cursor < swiftRange.upperBound {
+                attributed.addAttribute(.foregroundColor, value: punctuationColor, range: NSRange(cursor..<text.index(after: cursor), in: text))
+                cursor = text.index(after: cursor)
+            }
+        }
+    }
+
+    private static func highlightXMLBody(in text: String, range: NSRange, attributed: NSMutableAttributedString) {
+        guard let swiftRange = Range(range, in: text) else { return }
+        var cursor = swiftRange.lowerBound
+
+        while cursor < swiftRange.upperBound, let tagStart = text[cursor..<swiftRange.upperBound].firstIndex(of: "<") {
+            guard let tagEnd = text[tagStart..<swiftRange.upperBound].firstIndex(of: ">") else { break }
+            attributed.addAttributes([.foregroundColor: accentColor, .font: boldFont], range: NSRange(tagStart...tagEnd, in: text))
+            cursor = text.index(after: tagEnd)
+        }
+    }
+
+    private static func isJSONStringKey(after index: String.Index, upperBound: String.Index, in text: String) -> Bool {
+        var cursor = index
+        while cursor < upperBound, text[cursor].isWhitespace {
+            cursor = text.index(after: cursor)
+        }
+        return cursor < upperBound && text[cursor] == ":"
+    }
+
+    private static func isJSONNumberCharacter(_ character: Character) -> Bool {
+        character.isNumber || character == "." || character == "e" || character == "E" || character == "+" || character == "-"
+    }
+
+    private static func jsonLiteralRange(at index: String.Index, upperBound: String.Index, in text: String) -> Range<String.Index>? {
+        for literal in ["true", "false", "null"] {
+            guard text[index..<upperBound].hasPrefix(literal) else { continue }
+            let end = text.index(index, offsetBy: literal.count)
+            if end == upperBound || !isIdentifierCharacter(text[end]) {
+                return index..<end
+            }
+        }
+
+        return nil
+    }
+
+    private static func isIdentifierCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_"
     }
 
     private static func requestMethodRange(in line: String) -> Range<String.Index>? {
@@ -1838,6 +2426,12 @@ private enum HTTPHighlighter {
     private static let dangerColor = NSColor(calibratedRed: 0.700, green: 0.165, blue: 0.165, alpha: 1)
     private static let protocolColor = NSColor(calibratedRed: 0.285, green: 0.340, blue: 0.520, alpha: 1)
     private static let stringColor = NSColor(calibratedRed: 0.215, green: 0.445, blue: 0.690, alpha: 1)
+    private static let headerNameColor = NSColor(calibratedRed: 0.145, green: 0.365, blue: 0.690, alpha: 1)
+    private static let headerValueColor = NSColor.secondaryLabelColor
+    private static let parameterNameColor = NSColor(calibratedRed: 0.450, green: 0.235, blue: 0.670, alpha: 1)
+    private static let keywordColor = NSColor(calibratedRed: 0.365, green: 0.255, blue: 0.690, alpha: 1)
+    private static let numberColor = NSColor(calibratedRed: 0.085, green: 0.455, blue: 0.405, alpha: 1)
+    private static let punctuationColor = NSColor.tertiaryLabelColor
 
     private static var paragraphStyle: NSParagraphStyle {
         let style = NSMutableParagraphStyle()

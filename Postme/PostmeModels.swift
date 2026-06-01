@@ -127,17 +127,12 @@ struct ResponseSnapshot: Codable, Equatable {
     }
 
     var prettyBody: String {
-        guard
-            let data = body.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data),
-            JSONSerialization.isValidJSONObject(object),
-            let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-            let pretty = String(data: prettyData, encoding: .utf8)
-        else {
+        var parser = OrderedJSONParser(body)
+        guard let value = parser.parse() else {
             return body
         }
 
-        return pretty
+        return JSONDisplayRenderer.render(value)
     }
 }
 
