@@ -348,11 +348,9 @@ private struct RequestCommandBar: View {
                     Task { await store.sendSelectedRequest() }
                 } label: {
                     Label(store.isSending ? "Sending" : "Send", systemImage: store.isSending ? "hourglass" : "paperplane.fill")
-                        .frame(width: 84)
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
-                .buttonStyle(.borderedProminent)
-                .tint(PostmeTheme.accent)
+                .buttonStyle(PostmeSendButtonStyle())
                 .accessibilityLabel(store.isSending ? "Sending" : "Send request")
                 .disabled(!canSend)
                 .clickableHoverEffect(isEnabled: canSend)
@@ -1468,6 +1466,25 @@ private struct IconToolButton: View {
         .help(help)
         .buttonStyle(PostmeIconButtonStyle())
         .clickableHoverEffect()
+    }
+}
+
+private struct PostmeSendButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11.5, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(Color.white)
+            .frame(width: 84, height: 22)
+            .background(
+                PostmeTheme.accent.opacity(configuration.isPressed ? 0.84 : 1),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.white.opacity(0.18))
+            }
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }
 
