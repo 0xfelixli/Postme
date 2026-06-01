@@ -517,7 +517,7 @@ private struct RequestEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RawPane(title: "Request", subtitle: "Edit request line, headers, blank line, and body directly", systemImage: "doc.plaintext") {
+            RawPane(title: "Request", subtitle: "", systemImage: "doc.plaintext") {
                 RawRequestEditor(text: rawBinding)
             }
             .padding(PostmeLayout.panePadding)
@@ -543,7 +543,7 @@ private struct ResponsePreviewView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let errorMessage {
-                RawPane(title: "Request Failed", subtitle: "Transport or protocol error", systemImage: "exclamationmark.triangle", accent: PostmeTheme.danger, accessory: {
+                RawPane(title: "Response", subtitle: "", systemImage: "exclamationmark.triangle", accent: PostmeTheme.danger, accessory: {
                     responseModePicker
                 }) {
                     ErrorResponseSurface(message: errorMessage)
@@ -551,14 +551,14 @@ private struct ResponsePreviewView: View {
                 .padding(PostmeLayout.panePadding)
             } else if let response {
                 let rendered = ResponseDisplayFormatter.text(for: response, mode: viewMode, searchText: searchText)
-                RawPane(title: responsePaneTitle, subtitle: responsePaneSubtitle(rendered), systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode), accessory: {
+                RawPane(title: "Response", subtitle: "", systemImage: "doc.plaintext", accent: HTTPStatusTone.color(for: response.statusCode), accessory: {
                     responseModePicker
                 }) {
                     RawResponseSurface(text: rendered.text)
                 }
                 .padding(PostmeLayout.panePadding)
             } else {
-                RawPane(title: "Response", subtitle: emptyResponseSubtitle, systemImage: "doc.plaintext", accent: .secondary, accessory: {
+                RawPane(title: "Response", subtitle: "", systemImage: "doc.plaintext", accent: .secondary, accessory: {
                     responseModePicker
                 }) {
                     EmptyResponseSurface()
@@ -573,39 +573,6 @@ private struct ResponsePreviewView: View {
         ResponseModeSelector(selection: $viewMode)
     }
 
-    private var emptyResponseSubtitle: String {
-        isSending
-            ? "Waiting for raw HTTP response"
-            : "Raw HTTP response, headers, timing, and size will appear here"
-    }
-
-    private var responsePaneTitle: String {
-        switch viewMode {
-        case .raw:
-            return "Raw response"
-        case .pretty:
-            return "Pretty response"
-        case .hex:
-            return "Hex dump"
-        }
-    }
-
-    private func responsePaneSubtitle(_ rendered: ResponseDisplayFormatter.Result) -> String {
-        if let count = rendered.matchCount {
-            return count == 1
-                ? "1 matching line for \"\(rendered.searchText)\""
-                : "\(count) matching lines for \"\(rendered.searchText)\""
-        }
-
-        switch viewMode {
-        case .raw:
-            return "Socket bytes rendered as HTTP"
-        case .pretty:
-            return "Complete HTTP response with formatted body"
-        case .hex:
-            return "Raw response bytes as hexadecimal"
-        }
-    }
 }
 
 private enum ResponseViewMode: String, CaseIterable, Identifiable {
@@ -1389,10 +1356,12 @@ private struct PaneHeader<Accessory: View>: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 13.5, weight: .semibold))
-                Text(subtitle)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             accessory
