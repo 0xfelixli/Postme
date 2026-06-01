@@ -71,7 +71,7 @@ struct ContentView: View {
         .onExitCommand {
             isCommandPalettePresented = false
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 store.flushPersistence()
             }
@@ -2052,33 +2052,42 @@ private struct ClickableHoverStyleModifier: ViewModifier {
 }
 
 private struct PointingHandCursorModifier: ViewModifier {
-    @Environment(\.isEnabled) private var environmentEnabled
-    @State private var isHovering = false
-    @State private var isCursorActive = false
     var isEnabled = true
 
     func body(content: Content) -> some View {
         content
-            .onHover { isHovering in
-                self.isHovering = isHovering
-                updateCursor(isHovering && isEnabled && environmentEnabled)
-            }
-            .onChange(of: isEnabled && environmentEnabled) { _, canInteract in
-                updateCursor(isHovering && canInteract)
-            }
-            .onDisappear {
-                updateCursor(false)
+            .overlay {
+                if isEnabled {
+                    CursorRectView(cursor: .pointingHand)
+                        .allowsHitTesting(false)
+                }
             }
     }
+}
 
-    private func updateCursor(_ shouldActivate: Bool) {
-        guard shouldActivate != isCursorActive else { return }
-        if shouldActivate {
-            NSCursor.pointingHand.push()
-        } else {
-            NSCursor.pop()
+private struct CursorRectView: NSViewRepresentable {
+    let cursor: NSCursor
+
+    func makeNSView(context: Context) -> CursorRectNSView {
+        let view = CursorRectNSView()
+        view.cursor = cursor
+        return view
+    }
+
+    func updateNSView(_ nsView: CursorRectNSView, context: Context) {
+        nsView.cursor = cursor
+    }
+}
+
+private final class CursorRectNSView: NSView {
+    var cursor: NSCursor = .arrow {
+        didSet {
+            window?.invalidateCursorRects(for: self)
         }
-        isCursorActive = shouldActivate
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: cursor)
     }
 }
 
