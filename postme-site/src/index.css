@@ -123,12 +123,54 @@
     }
   body {
     @apply bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at 18% 8%, oklch(0.91 0.05 255 / 46%), transparent 28rem),
+      radial-gradient(circle at 84% 18%, oklch(0.92 0.045 218 / 36%), transparent 30rem),
+      linear-gradient(180deg, oklch(0.985 0.008 247), oklch(0.955 0.016 250));
     }
   button:not(:disabled), [role="button"]:not(:disabled) {
     cursor: pointer;
     }
+  a {
+    cursor: pointer;
+  }
   html {
     @apply font-sans;
     scroll-behavior: smooth;
     }
+}
+
+@layer components {
+  .skip-link {
+    @apply fixed left-4 top-4 z-50 -translate-y-16 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-lg transition-transform focus:translate-y-0;
+  }
+
+  .page-shell {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .page-shell::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.42;
+    background-image:
+      linear-gradient(oklch(0.22 0.03 255 / 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(0.22 0.03 255 / 0.045) 1px, transparent 1px);
+    background-size: 36px 36px;
+    mask-image: linear-gradient(to bottom, black, transparent 68%);
+  }
+
+  .soft-panel {
+    box-shadow:
+      0 28px 70px oklch(0.42 0.12 255 / 0.15),
+      inset 0 1px 0 oklch(1 0 0 / 0.82);
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
 }
