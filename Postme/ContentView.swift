@@ -1102,6 +1102,7 @@ private enum HTTPStatusTone {
 private enum PostmeLayout {
     static let requestToolbarHeight: CGFloat = 68
     static let panePadding: CGFloat = 12
+    static let paneHeaderHeight: CGFloat = 30
     static let cornerRadius: CGFloat = 7
 }
 
@@ -1299,6 +1300,7 @@ private struct RawPane<Accessory: View, Content: View>: View {
             PaneHeader(title: title, subtitle: subtitle, systemImage: systemImage, accent: accent) {
                 accessory
             }
+            .frame(height: PostmeLayout.paneHeaderHeight, alignment: .center)
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
