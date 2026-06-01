@@ -5,7 +5,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = PostmeStore()
     @State private var isCommandPalettePresented = false
-    @State private var responseViewMode: ResponseViewMode = .raw
+    @State private var responseViewMode: ResponseViewMode = .pretty
     @State private var responseSearchText = ""
 
     var body: some View {
@@ -576,8 +576,8 @@ private struct ResponsePreviewView: View {
 }
 
 private enum ResponseViewMode: String, CaseIterable, Identifiable {
-    case raw = "Raw"
     case pretty = "Pretty"
+    case raw = "Raw"
     case hex = "Hex"
 
     var id: String { rawValue }
