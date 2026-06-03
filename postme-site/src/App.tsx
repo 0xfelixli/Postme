@@ -92,13 +92,13 @@ function App() {
 
 function SiteHeader() {
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur-xl">
+    <header className="border-b bg-background">
       <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-5 md:px-8">
         <a className="flex items-center gap-2.5" href="#top" aria-label="Postme 首页">
           <img
             src="/postme-icon.png"
             alt="Postme app icon"
-            className="size-8 rounded-lg shadow-sm"
+            className="size-8 rounded-lg ring-1 ring-border"
           />
           <span className="font-heading text-sm font-semibold tracking-tight">
             Postme
@@ -131,21 +131,21 @@ function SiteHeader() {
 function HeroSection() {
   return (
     <section id="top" className="border-b">
-      <div className="mx-auto grid min-h-[calc(100dvh-3.5rem)] w-full max-w-7xl items-center gap-12 px-5 py-16 md:px-8 md:py-20 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="mx-auto grid w-full max-w-7xl items-center gap-12 px-5 py-18 md:px-8 md:py-24 lg:grid-cols-[0.88fr_1.12fr]">
         <div className="max-w-2xl">
           <div className="mb-6 flex items-center gap-3">
             <img
               src="/postme-icon.png"
               alt="Postme app icon"
-              className="size-12 rounded-xl shadow-lg shadow-primary/15"
+              className="size-12 rounded-xl ring-1 ring-border"
             />
-            <Badge className="rounded-md border-primary/20 bg-primary/8 text-primary" variant="outline">
+            <Badge className="rounded-full border-primary/15 bg-primary/8 px-2.5 text-primary" variant="outline">
               v1.0 可下载
             </Badge>
           </div>
 
-          <h1 className="max-w-3xl font-heading text-5xl font-semibold leading-[0.98] tracking-tight text-balance md:text-7xl">
-            把 HTTP 请求按真实的样子发出去。
+          <h1 className="max-w-3xl font-heading text-5xl font-bold leading-none tracking-[-0.045em] text-balance md:text-[4rem]">
+            Postme，把 HTTP 请求按原样发出去。
           </h1>
 
           <p className="text-pretty mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
@@ -184,19 +184,13 @@ function HeroSection() {
 
 function ProtocolDeck() {
   return (
-    <div className="relative mx-auto w-full max-w-2xl lg:translate-y-6">
-      <div className="absolute -left-6 top-10 hidden rounded-xl border bg-card/90 px-3 py-2 text-sm font-medium shadow-lg shadow-primary/10 backdrop-blur md:block">
-        raw request
-      </div>
-      <div className="absolute -right-4 bottom-18 hidden rounded-xl border bg-card/90 px-3 py-2 text-sm font-medium text-primary shadow-lg shadow-primary/10 backdrop-blur md:block">
-        response 200 OK
-      </div>
-      <div className="soft-panel rounded-2xl border bg-card/86 p-3 backdrop-blur">
-        <div className="mb-3 flex items-center justify-between rounded-xl border bg-muted/45 px-3 py-2">
+    <div className="relative mx-auto w-full max-w-2xl">
+      <div className="product-preview soft-panel rounded-2xl border bg-card p-3 md:p-4">
+        <div className="preview-toolbar mb-3 flex items-center justify-between rounded-lg border bg-muted/55 px-3 py-2">
           <div className="flex items-center gap-2">
             <span className="size-2.5 rounded-full bg-destructive" />
-            <span className="size-2.5 rounded-full bg-[oklch(0.76_0.15_85)]" />
-            <span className="size-2.5 rounded-full bg-[oklch(0.66_0.15_150)]" />
+            <span className="size-2.5 rounded-full bg-[oklch(0.72_0.12_86)]" />
+            <span className="size-2.5 rounded-full bg-[oklch(0.64_0.12_150)]" />
           </div>
           <div className="font-mono text-xs text-muted-foreground">
             GET /posts/1
@@ -237,6 +231,13 @@ function ProtocolDeck() {
           <StatusTile label="耗时" value="679 ms" />
           <StatusTile label="大小" value="1 KB" />
           <StatusTile label="模式" value="原始" />
+        </div>
+
+        <div className="preview-note mt-3 rounded-lg border bg-muted/45 px-3 py-2">
+          <span className="font-medium text-foreground">Raw / Pretty / Hex</span>
+          <span className="text-muted-foreground">
+            同一份响应，切换不同阅读方式。
+          </span>
         </div>
       </div>
     </div>
@@ -286,7 +287,9 @@ function StatusTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border bg-background/88 px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 font-mono text-sm font-medium">{value}</div>
+      <div className="mt-1 font-mono text-sm font-medium [font-variant-numeric:tabular-nums]">
+        {value}
+      </div>
     </div>
   )
 }
@@ -296,11 +299,11 @@ function ProtocolSection() {
     <section id="protocol" className="border-b px-5 py-20 md:px-8 md:py-28">
       <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.72fr_1.28fr]">
         <div className="max-w-xl">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-lg border bg-card/72 px-3 py-1.5 text-sm font-medium text-primary">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border-primary/15 bg-primary/8 px-3 py-1.5 text-sm font-semibold text-primary ring-1 ring-primary/10">
             <ScanSearch className="size-4" aria-hidden="true" />
             协议检查
           </div>
-          <h2 className="font-heading text-3xl font-semibold tracking-tight text-balance md:text-5xl">
+          <h2 className="font-heading text-3xl font-bold tracking-[-0.035em] text-balance md:text-5xl">
             请求和响应并排，少一点猜测。
           </h2>
           <p className="text-pretty mt-4 text-lg leading-8 text-muted-foreground">
@@ -345,7 +348,7 @@ function InfoBlock({
   text: string
 }) {
   return (
-    <Card className="group bg-card/76 transition-all duration-200 hover:-translate-y-1 hover:bg-card hover:shadow-xl hover:shadow-primary/8">
+    <Card className="bg-card/86 hover:bg-background">
       <CardHeader>
         <div className="mb-5 font-mono text-xs text-primary/70">{index}</div>
         <CardTitle>{title}</CardTitle>
@@ -357,9 +360,9 @@ function InfoBlock({
 
 function CapabilitySection() {
   return (
-    <section id="capabilities" className="border-b bg-muted/30 px-5 py-20 md:px-8 md:py-28">
+    <section id="capabilities" className="border-b bg-muted px-5 py-20 md:px-8 md:py-28">
       <div className="mx-auto max-w-7xl">
-        <h2 className="max-w-2xl font-heading text-3xl font-semibold tracking-tight text-balance md:text-5xl">
+        <h2 className="max-w-2xl font-heading text-3xl font-bold tracking-[-0.035em] text-balance md:text-5xl">
           为调试循环做减法。
         </h2>
 
@@ -368,8 +371,8 @@ function CapabilitySection() {
             <Card
               className={
                 index === 0 || index === 3
-                  ? "md:col-span-3 bg-card/88"
-                  : "md:col-span-2 bg-card/70"
+                  ? "md:col-span-3 bg-card"
+                  : "md:col-span-2 bg-card/92"
               }
               key={item.title}
             >
@@ -393,13 +396,13 @@ function WorkflowSection() {
     <section id="workflow" className="border-b px-5 py-20 md:px-8 md:py-28">
       <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.05fr_0.95fr]">
         <div>
-          <h2 className="max-w-2xl font-heading text-3xl font-semibold tracking-tight text-balance md:text-5xl">
+          <h2 className="max-w-2xl font-heading text-3xl font-bold tracking-[-0.035em] text-balance md:text-5xl">
             从粘贴请求到再次发送，路径要短。
           </h2>
           <div className="mt-8 grid gap-3">
             {workflow.map((item, index) => (
               <div
-                className="flex items-center gap-4 rounded-xl border bg-card/80 px-4 py-4 font-medium shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-primary/8"
+                className="flex items-center gap-4 rounded-xl border bg-card/86 px-4 py-4 font-medium transition-colors duration-200 hover:bg-background"
                 key={item}
               >
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 font-mono text-xs text-primary">
@@ -411,7 +414,7 @@ function WorkflowSection() {
           </div>
         </div>
 
-        <Card className="self-start bg-card/84">
+        <Card className="self-start bg-card">
           <CardHeader>
             <CardTitle>快捷键</CardTitle>
             <CardDescription>
@@ -440,7 +443,7 @@ function FooterCta() {
   return (
     <footer className="px-5 py-16 md:px-8">
       <div className="mx-auto max-w-7xl">
-        <div className="soft-panel rounded-2xl border bg-card/82 p-6 backdrop-blur md:p-8">
+        <div className="soft-panel rounded-2xl border bg-card p-6 md:p-8">
           <div className="flex flex-col gap-8 md:flex-row md:items-end md:justify-between">
             <div className="max-w-2xl">
               <div className="mb-4 flex items-center gap-3">
@@ -451,7 +454,7 @@ function FooterCta() {
                 />
                 <div className="font-heading text-lg font-semibold">Postme</div>
               </div>
-              <h2 className="font-heading text-3xl font-semibold tracking-tight text-balance">
+              <h2 className="font-heading text-3xl font-bold tracking-[-0.03em] text-balance">
                 一个更贴近协议本身的 macOS HTTP 重放器。
               </h2>
               <p className="mt-3 text-muted-foreground">
