@@ -13,19 +13,28 @@ final class PostmeStore: ObservableObject {
         didSet { scheduleSave() }
     }
     @Published var selectedRequestID: APIRequest.ID?
-    @Published var sidebarMode: SidebarMode = .collection
     @Published var response: ResponseSnapshot?
     @Published var errorMessage: String?
     @Published var isSending = false
 
     private let runner = RequestRunner()
     private let rawCodec = RawHTTPRequestCodec()
-    private let persistenceKey = "postme.workspace.v1"
+    private let sqliteStore: SQLiteWorkspaceStore?
+    private let legacyPersistenceKey = "postme.workspace.v1"
     private let historyLimit = 100
     private var saveTask: Task<Void, Never>?
 
     init() {
-        if let workspace = Self.loadWorkspace(key: persistenceKey) {
+        sqliteStore = try? SQLiteWorkspaceStore()
+
+        if let sqliteStore, let workspace = try? sqliteStore.loadWorkspace() {
+            let migrated = Self.migratedWorkspace(workspace)
+            requests = migrated.requests
+            history = migrated.history
+            variables = migrated.variables
+            selectedRequestID = migrated.requests.first?.id
+            saveImmediately()
+        } else if let workspace = Self.loadLegacyWorkspace(key: legacyPersistenceKey) {
             let migrated = Self.migratedWorkspace(workspace)
             requests = migrated.requests
             history = migrated.history
@@ -86,7 +95,6 @@ final class PostmeStore: ObservableObject {
         )
         requests.insert(request, at: 0)
         selectedRequestID = request.id
-        sidebarMode = .collection
         response = nil
         errorMessage = nil
     }
@@ -102,15 +110,23 @@ final class PostmeStore: ObservableObject {
 
     func selectRequest(_ requestID: APIRequest.ID) {
         selectedRequestID = requestID
-        sidebarMode = .collection
         response = nil
         errorMessage = nil
     }
 
     func deleteSelectedRequest() {
         guard let selectedRequestID, requests.count > 1 else { return }
-        requests.removeAll { $0.id == selectedRequestID }
-        self.selectedRequestID = requests.first?.id
+        closeRequest(selectedRequestID)
+    }
+
+    func closeRequest(_ requestID: APIRequest.ID) {
+        guard requests.count > 1, let index = requests.firstIndex(where: { $0.id == requestID }) else { return }
+        let wasSelected = selectedRequestID == requestID
+        requests.remove(at: index)
+        if wasSelected {
+            let nextIndex = min(index, requests.count - 1)
+            selectedRequestID = requests[nextIndex].id
+        }
         response = nil
         errorMessage = nil
     }
@@ -142,7 +158,6 @@ final class PostmeStore: ObservableObject {
         request.updatedAt = .now
         requests.insert(request, at: 0)
         selectedRequestID = request.id
-        sidebarMode = .collection
         response = nil
         errorMessage = entry.errorMessage
     }
@@ -172,6 +187,23 @@ final class PostmeStore: ObservableObject {
 
     func ensureRawRequest(for request: APIRequest) -> String {
         rawCodec.rawText(from: request)
+    }
+
+    func applyTargetInput(_ value: String, to requestID: APIRequest.ID) {
+        let input = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty, let index = requests.firstIndex(where: { $0.id == requestID }) else { return }
+
+        do {
+            if CurlCommandParser.looksLikeCurl(input) {
+                requests[index] = try CurlCommandParser().parse(input, fallback: requests[index])
+            } else {
+                requests[index] = try requestByUpdatingURL(input, from: requests[index])
+            }
+            response = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func appendToSelectedRawRequest(_ value: String) {
@@ -256,6 +288,53 @@ final class PostmeStore: ObservableObject {
         requests[index].updatedAt = .now
     }
 
+    private func requestByUpdatingURL(_ value: String, from request: APIRequest) throws -> APIRequest {
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(),
+              (scheme == "http" || scheme == "https"),
+              url.host != nil else {
+            throw RequestBuildError.invalidURL(value)
+        }
+
+        let baseline = parsedCurrentRequest(from: request)
+        var output = baseline
+        output.id = request.id
+        output.url = url.absoluteString
+        output.headers = headersByUpdatingHost(in: output.headers, url: url)
+        output.rawRequest = nil
+        output.rawRequest = rawCodec.rawText(from: output)
+        output.updatedAt = .now
+        return output
+    }
+
+    private func parsedCurrentRequest(from request: APIRequest) -> APIRequest {
+        let rawRequest = rawCodec.rawText(from: request)
+        let resolver = EnvironmentResolver(variables: variables)
+        return (try? rawCodec.parse(rawRequest, fallback: request, resolver: resolver)) ?? request
+    }
+
+    private func headersByUpdatingHost(in headers: [HeaderField], url: URL) -> [HeaderField] {
+        guard let host = hostValue(for: url) else {
+            return headers
+        }
+
+        var output = headers
+        if let index = output.firstIndex(where: { $0.key.caseInsensitiveCompare("Host") == .orderedSame }) {
+            output[index].value = host
+        } else {
+            output.insert(HeaderField(key: "Host", value: host), at: 0)
+        }
+        return output
+    }
+
+    private func hostValue(for url: URL) -> String? {
+        guard let host = url.host, !host.isEmpty else { return nil }
+        if let port = url.port {
+            return "\(host):\(port)"
+        }
+        return host
+    }
+
     private func prependHistory(_ entry: HistoryEntry) {
         history.insert(entry, at: 0)
         if history.count > historyLimit {
@@ -276,11 +355,21 @@ final class PostmeStore: ObservableObject {
         saveTask?.cancel()
         saveTask = nil
         let workspace = Workspace(requests: requests, history: history, variables: variables)
+
+        if let sqliteStore {
+            do {
+                try sqliteStore.saveWorkspace(workspace)
+                return
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
         guard let data = try? JSONEncoder.postme.encode(workspace) else { return }
-        UserDefaults.standard.set(data, forKey: persistenceKey)
+        UserDefaults.standard.set(data, forKey: legacyPersistenceKey)
     }
 
-    private static func loadWorkspace(key: String) -> Workspace? {
+    private static func loadLegacyWorkspace(key: String) -> Workspace? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder.postme.decode(Workspace.self, from: data)
     }
@@ -319,7 +408,7 @@ struct BindingBox<Value> {
     let set: (Value) -> Void
 }
 
-private struct Workspace: Codable {
+struct Workspace: Codable {
     var requests: [APIRequest]
     var history: [HistoryEntry]
     var variables: [EnvironmentVariable]

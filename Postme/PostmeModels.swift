@@ -158,14 +158,6 @@ struct HistoryEntry: Identifiable, Codable, Equatable {
     }
 }
 
-enum SidebarMode: String, CaseIterable, Identifiable {
-    case collection = "Collection"
-    case history = "History"
-    case environment = "Environment"
-
-    var id: String { rawValue }
-}
-
 enum RequestBuildError: LocalizedError, Equatable {
     case invalidURL(String)
     case invalidHeader(String)
@@ -363,5 +355,355 @@ struct RawHTTPRequestCodec {
             return port == 443 ? "https" : "http"
         }
         return fallbackScheme
+    }
+}
+
+struct CurlCommandParser {
+    static func looksLikeCurl(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == "curl"
+            || trimmed.hasPrefix("curl ")
+            || trimmed.hasPrefix("curl\t")
+            || trimmed == "curl.exe"
+            || trimmed.hasPrefix("curl.exe ")
+            || trimmed.hasPrefix("curl.exe\t")
+    }
+
+    func parse(_ command: String, fallback: APIRequest) throws -> APIRequest {
+        let tokens = try Self.shellTokens(from: command)
+        guard let commandName = tokens.first?.lowercased(),
+              commandName == "curl" || commandName == "curl.exe" else {
+            throw RequestBuildError.invalidRawRequest("expected a curl command")
+        }
+
+        var urlText: String?
+        var explicitMethod: HTTPMethod?
+        var headers: [HeaderField] = []
+        var bodyParts: [String] = []
+        var usesHead = false
+        var index = 1
+
+        while index < tokens.count {
+            let token = tokens[index]
+
+            if let value = optionValue(token, short: "-X", long: "--request", tokens: tokens, index: &index) {
+                guard let method = HTTPMethod(rawValue: value.uppercased()) else {
+                    throw RequestBuildError.invalidRawRequest("unsupported curl method \(value)")
+                }
+                explicitMethod = method
+            } else if let value = optionValue(token, short: "-H", long: "--header", tokens: tokens, index: &index) {
+                if let header = Self.header(from: value) {
+                    upsert(header, in: &headers)
+                }
+            } else if let value = optionValue(token, short: nil, long: "--url", tokens: tokens, index: &index) {
+                urlText = value
+            } else if let value = dataOptionValue(token, tokens: tokens, index: &index) {
+                bodyParts.append(value)
+            } else if let value = optionValue(token, short: "-b", long: "--cookie", tokens: tokens, index: &index) {
+                appendCookie(value, to: &headers)
+            } else if let value = optionValue(token, short: "-A", long: "--user-agent", tokens: tokens, index: &index) {
+                upsert(HeaderField(key: "User-Agent", value: value), in: &headers)
+            } else if let value = optionValue(token, short: "-e", long: "--referer", tokens: tokens, index: &index) {
+                upsert(HeaderField(key: "Referer", value: value), in: &headers)
+            } else if let value = optionValue(token, short: "-u", long: "--user", tokens: tokens, index: &index) {
+                let encoded = Data(value.utf8).base64EncodedString()
+                upsert(HeaderField(key: "Authorization", value: "Basic \(encoded)"), in: &headers)
+            } else if token == "-I" || token == "--head" {
+                usesHead = true
+            } else if Self.noValueOptions.contains(token) {
+                // Runtime-only curl behavior that has no direct raw HTTP representation here.
+            } else if Self.valueOptions.contains(token) {
+                index += 1
+            } else if token.hasPrefix("--") {
+                // Ignore unsupported long options without treating them as the request URL.
+            } else if token.hasPrefix("-") {
+                // Ignore unsupported short options without treating them as the request URL.
+            } else if urlText == nil {
+                urlText = token
+            }
+
+            index += 1
+        }
+
+        guard let rawURL = urlText?.trimmingCharacters(in: .whitespacesAndNewlines), !rawURL.isEmpty else {
+            throw RequestBuildError.invalidRawRequest("curl command is missing a URL")
+        }
+        guard let url = URL(string: rawURL),
+              let scheme = url.scheme?.lowercased(),
+              (scheme == "http" || scheme == "https"),
+              url.host != nil else {
+            throw RequestBuildError.invalidURL(rawURL)
+        }
+
+        let body = bodyParts.joined(separator: "&")
+        let method = explicitMethod ?? (usesHead ? .head : (body.isEmpty ? .get : .post))
+        let normalizedHeaders = normalizedHeaders(headers, url: url, bodyLength: Data(body.utf8).count)
+        let rawRequest = rawHTTPText(method: method, url: url, headers: normalizedHeaders, body: body)
+
+        return APIRequest(
+            id: fallback.id,
+            name: displayName(method: method, url: url, fallback: fallback.name),
+            method: method,
+            url: url.absoluteString,
+            headers: normalizedHeaders,
+            body: body,
+            rawRequest: rawRequest,
+            updatedAt: .now
+        )
+    }
+
+    private static let dataOptions: Set<String> = [
+        "-d", "--data", "--data-raw", "--data-binary", "--data-ascii", "--data-urlencode"
+    ]
+
+    private static let noValueOptions: Set<String> = [
+        "-L", "--location", "-k", "--insecure", "-i", "--include", "-s", "--silent",
+        "-S", "--show-error", "-v", "--verbose", "--compressed", "--globoff",
+        "--http1.0", "--http1.1", "--http2", "--http2-prior-knowledge", "--ipv4", "--ipv6",
+        "-G", "--get"
+    ]
+
+    private static let valueOptions: Set<String> = [
+        "-m", "--max-time", "--connect-timeout", "--retry", "--retry-delay", "--proxy",
+        "--proxy-user", "--cacert", "--cert", "--key", "--resolve", "--interface",
+        "-o", "--output", "--request-target", "--form", "-F", "--form-string"
+    ]
+
+    private static func shellTokens(from command: String) throws -> [String] {
+        let normalized = command
+            .replacingOccurrences(of: "\\\r\n", with: " ")
+            .replacingOccurrences(of: "\\\n", with: " ")
+            .replacingOccurrences(of: "\\\r", with: " ")
+        let characters = Array(normalized)
+        var tokens: [String] = []
+        var current = ""
+        var quote: Character?
+        var index = 0
+
+        func flushToken() {
+            guard !current.isEmpty else { return }
+            tokens.append(current)
+            current = ""
+        }
+
+        while index < characters.count {
+            let character = characters[index]
+
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else if activeQuote == "\"", character == "\\", index + 1 < characters.count {
+                    index += 1
+                    current.append(characters[index])
+                } else {
+                    current.append(character)
+                }
+            } else if character == "'" || character == "\"" {
+                quote = character
+            } else if character == "\\", index + 1 < characters.count {
+                index += 1
+                current.append(characters[index])
+            } else if character.isWhitespace {
+                flushToken()
+            } else {
+                current.append(character)
+            }
+
+            index += 1
+        }
+
+        guard quote == nil else {
+            throw RequestBuildError.invalidRawRequest("unterminated quote in curl command")
+        }
+
+        flushToken()
+        return tokens
+    }
+
+    private func optionValue(_ token: String, short: String?, long: String, tokens: [String], index: inout Int) -> String? {
+        if token == long {
+            guard index + 1 < tokens.count else { return "" }
+            index += 1
+            return tokens[index]
+        }
+
+        let longPrefix = long + "="
+        if token.hasPrefix(longPrefix) {
+            return String(token.dropFirst(longPrefix.count))
+        }
+
+        guard let short else { return nil }
+        if token == short {
+            guard index + 1 < tokens.count else { return "" }
+            index += 1
+            return tokens[index]
+        }
+
+        if token.hasPrefix(short), token.count > short.count {
+            return String(token.dropFirst(short.count))
+        }
+
+        return nil
+    }
+
+    private func dataOptionValue(_ token: String, tokens: [String], index: inout Int) -> String? {
+        for option in Self.dataOptions {
+            if token == option {
+                guard index + 1 < tokens.count else { return "" }
+                index += 1
+                return tokens[index]
+            }
+
+            let longPrefix = option + "="
+            if option.hasPrefix("--"), token.hasPrefix(longPrefix) {
+                return String(token.dropFirst(longPrefix.count))
+            }
+        }
+
+        if token.hasPrefix("-d"), token.count > 2 {
+            return String(token.dropFirst(2))
+        }
+
+        return nil
+    }
+
+    private static func header(from value: String) -> HeaderField? {
+        guard let colon = value.firstIndex(of: ":") else { return nil }
+        var key = String(value[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let headerValue = String(value[value.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !key.hasPrefix(":") else { return nil }
+        if key.caseInsensitiveCompare("authority") == .orderedSame {
+            key = "Host"
+        }
+        return HeaderField(key: key, value: headerValue)
+    }
+
+    private func appendCookie(_ value: String, to headers: inout [HeaderField]) {
+        guard let index = headers.firstIndex(where: { $0.key.caseInsensitiveCompare("Cookie") == .orderedSame }) else {
+            headers.append(HeaderField(key: "Cookie", value: value))
+            return
+        }
+
+        if headers[index].value.isEmpty {
+            headers[index].value = value
+        } else {
+            headers[index].value += "; \(value)"
+        }
+    }
+
+    private func upsert(_ header: HeaderField, in headers: inout [HeaderField]) {
+        guard !header.key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard header.key.caseInsensitiveCompare("Content-Length") != .orderedSame else { return }
+
+        if let index = headers.firstIndex(where: { $0.key.caseInsensitiveCompare(header.key) == .orderedSame }) {
+            headers[index].value = header.value
+        } else {
+            headers.append(header)
+        }
+    }
+
+    private func normalizedHeaders(_ headers: [HeaderField], url: URL, bodyLength: Int) -> [HeaderField] {
+        var output = headers.filter { $0.key.caseInsensitiveCompare("Content-Length") != .orderedSame }
+
+        if !output.contains(where: { $0.key.caseInsensitiveCompare("Host") == .orderedSame }),
+           let host = hostValue(for: url) {
+            output.insert(HeaderField(key: "Host", value: host), at: 0)
+        }
+
+        if bodyLength > 0 {
+            output.append(HeaderField(key: "Content-Length", value: "\(bodyLength)"))
+        }
+
+        return output
+    }
+
+    private func rawHTTPText(method: HTTPMethod, url: URL, headers: [HeaderField], body: String) -> String {
+        var lines = ["\(method.rawValue) \(targetText(for: url)) HTTP/1.1"]
+        lines.append(contentsOf: headers.map { "\($0.key): \($0.value)" })
+        return (lines + ["", body]).joined(separator: "\n")
+    }
+
+    private func targetText(for url: URL) -> String {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.path.isEmpty ? "/" : url.path
+        }
+
+        var target = components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath
+        if let query = components.percentEncodedQuery, !query.isEmpty {
+            target += "?\(query)"
+        }
+        return target
+    }
+
+    private func hostValue(for url: URL) -> String? {
+        guard let host = url.host, !host.isEmpty else { return nil }
+        if let port = url.port {
+            return "\(host):\(port)"
+        }
+        return host
+    }
+
+    private func displayName(method: HTTPMethod, url: URL, fallback: String) -> String {
+        let fallbackName = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fallbackName.isEmpty, fallbackName != "Untitled Request" {
+            return fallback
+        }
+
+        let path = targetText(for: url)
+        return "\(method.rawValue) \(path)"
+    }
+}
+
+struct CurlCommandFormatter {
+    func command(from rawText: String, fallback: APIRequest, variables: [EnvironmentVariable]) throws -> String {
+        let resolver = EnvironmentResolver(variables: variables)
+        let request = try RawHTTPRequestCodec().parse(rawText, fallback: fallback, resolver: resolver)
+        guard let url = URL(string: request.url) else {
+            throw RequestBuildError.invalidURL(request.url)
+        }
+
+        var parts = ["curl \(Self.shellQuoted(url.absoluteString))"]
+        if request.method != .get || !request.body.isEmpty {
+            parts.append("-X \(request.method.rawValue)")
+        }
+
+        for header in headersForCurl(request.headers, url: url) {
+            parts.append("-H \(Self.shellQuoted("\(header.key): \(header.value)"))")
+        }
+
+        if !request.body.isEmpty {
+            parts.append("--data-raw \(Self.shellQuoted(request.body))")
+        }
+
+        return parts.joined(separator: " \\\n  ")
+    }
+
+    private func headersForCurl(_ headers: [HeaderField], url: URL) -> [HeaderField] {
+        headers.filter { header in
+            guard header.isEnabled else { return false }
+            let key = header.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return false }
+            guard key.caseInsensitiveCompare("Content-Length") != .orderedSame else { return false }
+            guard key.caseInsensitiveCompare("Connection") != .orderedSame else { return false }
+
+            if key.caseInsensitiveCompare("Host") == .orderedSame,
+               header.value.caseInsensitiveCompare(hostValue(for: url) ?? "") == .orderedSame {
+                return false
+            }
+
+            return true
+        }
+    }
+
+    private func hostValue(for url: URL) -> String? {
+        guard let host = url.host, !host.isEmpty else { return nil }
+        if let port = url.port {
+            return "\(host):\(port)"
+        }
+        return host
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

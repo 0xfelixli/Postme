@@ -10,12 +10,14 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            HSplitView {
-                SidebarView(store: store)
-                    .frame(minWidth: 220, idealWidth: 236, maxWidth: 264, maxHeight: .infinity)
-
+            Group {
                 if let box = store.bindingForSelectedRequest() {
                     VStack(spacing: 0) {
+                        RequestTabStrip(store: store)
+                            .frame(height: PostmeLayout.requestTabStripHeight)
+
+                        Divider()
+
                         RequestCommandBar(
                             request: Binding(get: box.get, set: box.set),
                             store: store,
@@ -40,13 +42,13 @@ struct ContentView: View {
                                 viewMode: $responseViewMode,
                                 searchText: $responseSearchText
                             )
-                                .frame(minWidth: 420, idealWidth: 520, maxHeight: .infinity)
+                            .frame(minWidth: 420, idealWidth: 520, maxHeight: .infinity)
                         }
                     }
-                    .frame(minWidth: 920, idealWidth: 1140, maxHeight: .infinity)
+                    .frame(minWidth: 900, idealWidth: 1120, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView("No Request", systemImage: "tray")
-                        .frame(minWidth: 920, idealWidth: 1140, maxHeight: .infinity)
+                        .frame(minWidth: 900, idealWidth: 1120, maxHeight: .infinity)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
@@ -57,7 +59,7 @@ struct ContentView: View {
                 CommandPaletteView(store: store, isPresented: $isCommandPalettePresented)
             }
         }
-        .frame(minWidth: 1120, minHeight: 720)
+        .frame(minWidth: 920, minHeight: 720)
         .background {
             Button {
                 isCommandPalettePresented = true
@@ -79,161 +81,139 @@ struct ContentView: View {
     }
 }
 
-private struct SidebarView: View {
+private struct RequestTabStrip: View {
     @ObservedObject var store: PostmeStore
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
-                HStack(spacing: 7) {
-                    Image(systemName: "paperplane.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(PostmeTheme.accent)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Postme")
-                            .font(.footnote.weight(.semibold))
-                        Text("Repeater Workspace")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: 3) {
+                    ForEach(store.requests) { request in
+                        RequestTab(
+                            request: request,
+                            isSelected: store.selectedRequestID == request.id,
+                            canClose: store.requests.count > 1,
+                            select: { store.selectRequest(request.id) },
+                            close: { store.closeRequest(request.id) }
+                        )
                     }
                 }
-                Spacer()
-                Button {
-                    store.addRequest()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .help("New request")
-                .accessibilityLabel("New request")
-                .contentShape(Rectangle())
-                .keyboardShortcut("n", modifiers: .command)
-                .clickableHoverEffect()
+                .padding(.horizontal, 8)
+                .padding(.top, 5)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 5)
 
-            SidebarModeRail(selection: $store.sidebarMode)
-                .padding(.horizontal, 10)
+            Divider()
+                .frame(height: 24)
 
-            switch store.sidebarMode {
-            case .collection:
-                CollectionListView(store: store)
-            case .history:
-                HistoryListView(store: store)
-            case .environment:
-                EnvironmentEditorView(store: store)
+            Button {
+                store.addRequest()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 28, height: 24)
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("New request tab")
+            .accessibilityLabel("New request tab")
+            .clickableHoverEffect()
+            .padding(.horizontal, 6)
         }
-        .background(PostmeTheme.sidebar)
-    }
-}
-
-private struct CollectionListView: View {
-    @ObservedObject var store: PostmeStore
-
-    var body: some View {
-        List(selection: $store.selectedRequestID) {
-            Section {
-                ForEach(store.requests) { request in
-                    SidebarRequestRow(request: request, isSelected: store.selectedRequestID == request.id)
-                    .tag(request.id)
-                    .onTapGesture(count: 2) {
-                        store.selectRequest(request.id)
-                        Task { await store.sendSelectedRequest() }
-                    }
-                }
-            } header: {
-                Text("Requests")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(nil)
-                    .padding(.top, 2)
-                    .padding(.bottom, 2)
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(PostmeTheme.sidebar)
-        .contextMenu {
-            Button("Duplicate") { store.duplicateSelectedRequest() }
-            Button("Delete", role: .destructive) { store.deleteSelectedRequest() }
+        .background(PostmeTheme.toolbar)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(PostmeTheme.separator.opacity(0.45))
+                .frame(height: 1)
         }
     }
 }
 
-private struct HistoryListView: View {
-    @ObservedObject var store: PostmeStore
+private struct RequestTab: View {
+    let request: APIRequest
+    let isSelected: Bool
+    let canClose: Bool
+    let select: () -> Void
+    let close: () -> Void
 
     var body: some View {
-        List {
-            if store.history.isEmpty {
-                SidebarEmptyState(
-                    systemImage: "clock.badge.questionmark",
-                    title: "No history yet",
-                    subtitle: "Sent requests will appear here with status, timing, and errors."
-                )
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-            } else {
-                ForEach(store.history) { entry in
-                    Button {
-                        store.loadHistory(entry)
-                    } label: {
-                        HistoryEntryRow(entry: entry)
-                    }
-                    .buttonStyle(.plain)
-                    .clickableHoverEffect()
-                    .padding(.vertical, 1)
-                }
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(PostmeTheme.sidebar)
-    }
-}
+        HStack(spacing: 7) {
+            Text(request.method.rawValue)
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(methodTint)
+                .frame(width: 34, alignment: .leading)
 
-private struct HistoryEntryRow: View {
-    let entry: HistoryEntry
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                MethodBadge(method: entry.request.method)
-                Text(entry.request.url)
-                    .font(.caption.weight(.medium))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(tabTitle)
+                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
                     .lineLimit(1)
-                Spacer(minLength: 4)
-            }
+                    .truncationMode(.middle)
 
-            HStack(spacing: 6) {
-                StatusDot(color: statusColor)
-                Text(statusText)
-                    .foregroundStyle(statusColor)
-                    .lineLimit(1)
-                Text(entry.sentAt, style: .relative)
+                Text(tabSubtitle)
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            .font(.caption2.weight(.medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: close) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .frame(width: 15, height: 15)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+            .opacity(canClose ? (isSelected ? 1 : 0.62) : 0)
+            .disabled(!canClose)
+            .help("Close tab")
+            .accessibilityLabel("Close tab")
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .frame(width: 196, height: 30)
         .contentShape(Rectangle())
+        .background(tabBackground)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(isSelected ? PostmeTheme.accent : Color.clear)
+                .frame(height: 2)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(PostmeTheme.separator.opacity(isSelected ? 0.46 : 0.24))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .onTapGesture(perform: select)
+        .accessibilityLabel("\(request.method.rawValue) \(tabTitle)")
     }
 
-    private var statusText: String {
-        if let errorMessage = entry.errorMessage {
-            return errorMessage
-        }
-        if let statusCode = entry.statusCode, let reason = entry.reason {
-            return "\(statusCode) \(reason)"
-        }
-        return "Failed"
+    private var tabTitle: String {
+        let displayName = request.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return displayName.isEmpty ? "Untitled Request" : displayName
     }
 
-    private var statusColor: Color {
-        if let statusCode = entry.statusCode {
-            return HTTPStatusTone.color(for: statusCode)
+    private var tabSubtitle: String {
+        guard let url = URL(string: request.url) else { return "raw request" }
+        if let host = url.host, !host.isEmpty {
+            return host
         }
-        return PostmeTheme.danger
+        return url.scheme ?? "raw"
+    }
+
+    private var tabBackground: some ShapeStyle {
+        isSelected ? AnyShapeStyle(PostmeTheme.raised) : AnyShapeStyle(PostmeTheme.control.opacity(0.62))
+    }
+
+    private var methodTint: Color {
+        switch request.method {
+        case .get:
+            return PostmeTheme.success
+        case .post, .put, .patch:
+            return PostmeTheme.accent
+        case .delete:
+            return PostmeTheme.danger
+        case .head, .options:
+            return PostmeTheme.warning
+        }
     }
 }
 
@@ -295,6 +275,7 @@ private struct EnvironmentEditorView: View {
             .padding(.bottom, 5)
         }
         .padding(.top, 2)
+        .background(PostmeTheme.sidebar)
     }
 }
 
@@ -339,13 +320,14 @@ private struct RequestCommandBar: View {
     @ObservedObject var store: PostmeStore
     let responseViewMode: ResponseViewMode
     @Binding var responseSearchText: String
+    @State private var isEnvironmentPresented = false
 
     var body: some View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
                 MethodBadge(method: request.method)
                 SchemeBadge(scheme: requestScheme)
-                RequestURLField(url: request.url)
+                RequestURLField(request: $request, store: store)
 
                 Button {
                     Task { await store.sendSelectedRequest() }
@@ -380,18 +362,25 @@ private struct RequestCommandBar: View {
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
 
+                IconToolButton(systemName: "curlybraces.square", help: "Environment variables") {
+                    isEnvironmentPresented.toggle()
+                }
+                .popover(isPresented: $isEnvironmentPresented, arrowEdge: .bottom) {
+                    EnvironmentEditorView(store: store)
+                        .frame(width: 360, height: 430)
+                }
+
                 Spacer(minLength: 12)
 
+                RequestStatusCapsule(
+                    isSending: store.isSending,
+                    response: store.response,
+                    errorMessage: store.errorMessage
+                )
+
                 if let response = store.response {
-                    ResponseStatusPill(response: response)
                     MetricPill(value: "\(Int(response.duration * 1000)) ms")
                     MetricPill(value: ByteCountFormatter.string(fromByteCount: Int64(response.size), countStyle: .file))
-                } else if store.isSending {
-                    MetricPill(value: "Sending")
-                } else if store.errorMessage != nil {
-                    MetricPill(value: "Error")
-                } else {
-                    MetricPill(value: "No response")
                 }
 
                 HStack(spacing: 7) {
@@ -461,19 +450,26 @@ private struct RequestCommandBar: View {
 }
 
 private struct RequestURLField: View {
-    let url: String
+    @Binding var request: APIRequest
+    @ObservedObject var store: PostmeStore
+    @State private var draft = ""
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: "link")
+            Image(systemName: iconName)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
 
-            Text(url)
+            TextField("Paste URL or cURL", text: $draft)
+                .textFieldStyle(.plain)
                 .font(.system(size: 12.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .focused($isFocused)
+                .onSubmit {
+                    commitDraft()
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
@@ -484,6 +480,52 @@ private struct RequestURLField: View {
             RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius)
                 .stroke(PostmeTheme.separator.opacity(0.30))
         }
+        .help("Paste a URL, or paste a browser Copy as cURL command to convert it into raw HTTP.")
+        .onAppear {
+            syncDraft(force: true)
+        }
+        .onChange(of: request.id) { _, _ in
+            syncDraft(force: true)
+        }
+        .onChange(of: request.url) { _, _ in
+            syncDraft(force: false)
+        }
+        .onChange(of: isFocused) { _, focused in
+            if focused {
+                syncDraft(force: true)
+            } else {
+                commitDraft()
+            }
+        }
+        .onChange(of: draft) { _, value in
+            commitIfCompleteCurl(value)
+        }
+    }
+
+    private var iconName: String {
+        CurlCommandParser.looksLikeCurl(draft) ? "terminal" : "link"
+    }
+
+    private func syncDraft(force: Bool) {
+        guard force || !isFocused else { return }
+        draft = request.url
+    }
+
+    private func commitDraft(_ value: String? = nil) {
+        let input = (value ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty, input != request.url else {
+            syncDraft(force: true)
+            return
+        }
+
+        store.applyTargetInput(input, to: request.id)
+        draft = store.selectedRequest?.url ?? request.url
+    }
+
+    private func commitIfCompleteCurl(_ value: String) {
+        guard isFocused, CurlCommandParser.looksLikeCurl(value) else { return }
+        guard (try? CurlCommandParser().parse(value, fallback: request)) != nil else { return }
+        commitDraft(value)
     }
 }
 
@@ -519,7 +561,15 @@ private struct RequestEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             RawPane(title: "Request", subtitle: "", systemImage: "doc.plaintext") {
-                RawRequestEditor(text: rawBinding)
+                RawRequestEditor(
+                    text: rawBinding,
+                    repeatRequest: {
+                        store.duplicateSelectedRequest()
+                    },
+                    copyAsCurl: {
+                        copySelectedRequestAsCurl()
+                    }
+                )
             }
             .padding(PostmeLayout.panePadding)
         }
@@ -531,6 +581,20 @@ private struct RequestEditorView: View {
             get: { request.rawRequest ?? store.ensureRawRequest(for: request) },
             set: { request.rawRequest = $0 }
         )
+    }
+
+    private func copySelectedRequestAsCurl() {
+        do {
+            let command = try CurlCommandFormatter().command(
+                from: rawBinding.wrappedValue,
+                fallback: request,
+                variables: store.variables
+            )
+            Clipboard.copy(command)
+            store.errorMessage = nil
+        } catch {
+            store.errorMessage = error.localizedDescription
+        }
     }
 }
 
@@ -1197,30 +1261,6 @@ private struct CommandPaletteView: View {
                 systemImage: "wand.and.stars",
                 keywords: ["content-length", "host", "connection", "fix"],
                 run: { store.normalizeSelectedRawRequest() }
-            ),
-            CommandPaletteItem(
-                title: "Show Collection",
-                subtitle: "Switch sidebar to saved requests",
-                group: "View",
-                systemImage: "folder",
-                keywords: ["requests"],
-                run: { store.sidebarMode = .collection }
-            ),
-            CommandPaletteItem(
-                title: "Show History",
-                subtitle: "Switch sidebar to sent requests",
-                group: "View",
-                systemImage: "clock.arrow.circlepath",
-                keywords: ["recent"],
-                run: { store.sidebarMode = .history }
-            ),
-            CommandPaletteItem(
-                title: "Show Environment",
-                subtitle: "Switch sidebar to variables",
-                group: "View",
-                systemImage: "curlybraces",
-                keywords: ["variables", "env"],
-                run: { store.sidebarMode = .environment }
             )
         ]
 
@@ -1464,19 +1504,19 @@ private extension String {
 }
 
 private enum PostmeTheme {
-    static let window = Color(red: 0.936, green: 0.942, blue: 0.948)
-    static let sidebar = Color(red: 0.906, green: 0.915, blue: 0.924)
-    static let toolbar = Color(red: 0.928, green: 0.936, blue: 0.944).opacity(0.98)
-    static let control = Color(red: 0.976, green: 0.979, blue: 0.982)
-    static let raised = Color(red: 0.996, green: 0.997, blue: 0.998)
-    static let editor = Color(red: 0.989, green: 0.991, blue: 0.994)
-    static let gutter = Color(red: 0.936, green: 0.942, blue: 0.948)
-    static let separator = Color(red: 0.742, green: 0.766, blue: 0.790)
-    static let accent = Color(red: 0.145, green: 0.365, blue: 0.690)
-    static let accentSoft = Color(red: 0.145, green: 0.365, blue: 0.690).opacity(0.11)
-    static let success = Color(red: 0.130, green: 0.520, blue: 0.280)
+    static let window = Color(red: 0.955, green: 0.949, blue: 0.940)
+    static let sidebar = Color(red: 0.925, green: 0.918, blue: 0.906)
+    static let toolbar = Color(red: 0.946, green: 0.940, blue: 0.930).opacity(0.98)
+    static let control = Color(red: 0.982, green: 0.978, blue: 0.970)
+    static let raised = Color(red: 1.000, green: 0.998, blue: 0.994)
+    static let editor = Color(red: 0.990, green: 0.987, blue: 0.980)
+    static let gutter = Color(red: 0.930, green: 0.923, blue: 0.912)
+    static let separator = Color(red: 0.675, green: 0.650, blue: 0.615)
+    static let accent = Color(red: 0.000, green: 0.459, blue: 0.871)
+    static let accentSoft = Color(red: 0.000, green: 0.459, blue: 0.871).opacity(0.10)
+    static let success = Color(red: 0.145, green: 0.560, blue: 0.310)
     static let danger = Color(red: 0.700, green: 0.165, blue: 0.165)
-    static let warning = Color(red: 0.760, green: 0.425, blue: 0.090)
+    static let warning = Color(red: 0.760, green: 0.445, blue: 0.120)
 }
 
 
@@ -1496,6 +1536,7 @@ private enum HTTPStatusTone {
 }
 
 private enum PostmeLayout {
+    static let requestTabStripHeight: CGFloat = 36
     static let requestToolbarHeight: CGFloat = 68
     static let panePadding: CGFloat = 12
     static let paneHeaderHeight: CGFloat = 30
@@ -1508,116 +1549,14 @@ private struct PostmeBackdrop: View {
             PostmeTheme.window
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.34),
-                    Color(red: 0.88, green: 0.895, blue: 0.910).opacity(0.30)
+                    Color.white.opacity(0.42),
+                    Color(red: 0.900, green: 0.890, blue: 0.875).opacity(0.32)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
         }
         .ignoresSafeArea()
-    }
-}
-
-private struct SidebarModeRail: View {
-    @Binding var selection: SidebarMode
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(SidebarMode.allCases) { mode in
-                Button {
-                    selection = mode
-                } label: {
-                    Label(mode.rawValue, systemImage: icon(for: mode))
-                        .labelStyle(.iconOnly)
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 24)
-                        .foregroundStyle(selection == mode ? PostmeTheme.accent : .secondary)
-                        .background(selection == mode ? PostmeTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .help(mode.rawValue)
-                .clickableHoverEffect()
-            }
-        }
-        .padding(1.5)
-        .background(PostmeTheme.window.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(PostmeTheme.separator.opacity(0.45))
-        }
-    }
-
-    private func icon(for mode: SidebarMode) -> String {
-        switch mode {
-        case .collection:
-            return "folder"
-        case .history:
-            return "clock.arrow.circlepath"
-        case .environment:
-            return "curlybraces"
-        }
-    }
-}
-
-private struct SidebarRequestRow: View {
-    let request: APIRequest
-    let isSelected: Bool
-
-    var body: some View {
-        HStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(isSelected ? PostmeTheme.accent : Color.clear)
-                .frame(width: 2, height: 34)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    MethodBadge(method: request.method)
-                    Text(request.displayName)
-                        .font(.footnote.weight(.semibold))
-                        .lineLimit(1)
-                    Spacer()
-                }
-                HStack(spacing: 4) {
-                    Text(hostText)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text(pathText)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.vertical, 3)
-            .padding(.trailing, 6)
-        }
-        .padding(.leading, 5)
-        .background(isSelected ? PostmeTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius))
-        .overlay {
-            if isSelected {
-                RoundedRectangle(cornerRadius: PostmeLayout.cornerRadius)
-                    .stroke(PostmeTheme.accent.opacity(0.22))
-            }
-        }
-        .contentShape(Rectangle())
-    }
-
-    private var hostText: String {
-        if let url = URL(string: request.url), let host = url.host {
-            return host
-        }
-        return request.url.replacingOccurrences(of: "{{baseUrl}}", with: "$baseUrl")
-    }
-
-    private var pathText: String {
-        guard let url = URL(string: request.url) else { return "" }
-        var path = url.path.isEmpty ? "/" : url.path
-        if let query = url.query, !query.isEmpty {
-            path += "?\(query)"
-        }
-        return path
     }
 }
 
@@ -1835,6 +1774,77 @@ private struct ResponseStatusPill: View {
     }
 }
 
+private struct RequestStatusCapsule: View {
+    let isSending: Bool
+    let response: ResponseSnapshot?
+    let errorMessage: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(tint)
+                .symbolEffect(.pulse, options: .repeating, isActive: isSending)
+
+            Text(title)
+                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .frame(maxWidth: 210, alignment: .leading)
+        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(tint.opacity(0.17))
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var systemImage: String {
+        if isSending { return "paperplane.fill" }
+        if response != nil { return "checkmark.circle.fill" }
+        if errorMessage != nil { return "exclamationmark.triangle.fill" }
+        return "circle.dashed"
+    }
+
+    private var title: String {
+        if isSending { return "Sending" }
+        if let response { return response.statusLine }
+        if errorMessage != nil { return "Error" }
+        return "No response"
+    }
+
+    private var detail: String? {
+        if isSending { return "Raw HTTP" }
+        if response != nil { return nil }
+        return errorMessage
+    }
+
+    private var tint: Color {
+        if isSending { return PostmeTheme.accent }
+        if let response { return HTTPStatusTone.color(for: response.statusCode) }
+        if errorMessage != nil { return PostmeTheme.danger }
+        return .secondary
+    }
+
+    private var accessibilityLabel: String {
+        if let detail {
+            return "\(title), \(detail)"
+        }
+        return title
+    }
+}
+
 private struct MetricPill: View {
     let value: String
 
@@ -1888,11 +1898,21 @@ private struct PostmeSendButtonStyle: ButtonStyle {
 
 private struct RawRequestEditor: View {
     @Binding var text: String
+    let repeatRequest: () -> Void
+    let copyAsCurl: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             EditorGutter(lineCount: lineCount)
-            HighlightedHTTPTextView(text: $text, isEditable: true, allowsInsertionCursor: true, wrapsLines: false)
+            HighlightedHTTPTextView(
+                text: $text,
+                isEditable: true,
+                allowsInsertionCursor: true,
+                wrapsLines: true,
+                contextMenuStyle: .editable,
+                repeatRequest: repeatRequest,
+                copyAsCurl: copyAsCurl
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rawSurfaceStyle()
@@ -1907,13 +1927,13 @@ private struct RawResponseSurface: View {
     let text: String
 
     var body: some View {
-        HighlightedHTTPTextView(text: .constant(text), isEditable: false, allowsInsertionCursor: true, wrapsLines: true)
-            .contextMenu {
-                Button("Copy All") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                }
-            }
+        HighlightedHTTPTextView(
+            text: .constant(text),
+            isEditable: false,
+            allowsInsertionCursor: true,
+            wrapsLines: true,
+            contextMenuStyle: .readOnly
+        )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .rawSurfaceStyle()
     }
@@ -1924,6 +1944,9 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
     let isEditable: Bool
     let allowsInsertionCursor: Bool
     let wrapsLines: Bool
+    var contextMenuStyle: HighlightedTextContextMenuStyle = .none
+    var repeatRequest: (() -> Void)?
+    var copyAsCurl: (() -> Void)?
     private var layout: HighlightedTextLayout {
         wrapsLines ? .wrapped : .raw
     }
@@ -1966,7 +1989,13 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.enabledTextCheckingTypes = 0
         applyLayout(to: textView, in: scrollView)
+        context.coordinator.applyContextMenu(to: textView)
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
@@ -1979,6 +2008,7 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
         context.coordinator.parent = self
         textView.isEditable = textViewAllowsEditing
         applyLayout(to: textView, in: scrollView)
+        context.coordinator.applyContextMenu(to: textView)
 
         if textView.string != text {
             context.coordinator.apply(text)
@@ -2021,6 +2051,63 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
             parent.isEditable
         }
 
+        func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            switch parent.contextMenuStyle {
+            case .none:
+                return nil
+            case .editable:
+                return editableMenu()
+            case .readOnly:
+                return readOnlyMenu()
+            }
+        }
+
+        func applyContextMenu(to textView: NSTextView) {
+            switch parent.contextMenuStyle {
+            case .none:
+                textView.menu = nil
+            case .editable:
+                textView.menu = editableMenu()
+            case .readOnly:
+                textView.menu = readOnlyMenu()
+            }
+        }
+
+        @objc private func copyAll(_ sender: Any?) {
+            guard let textView else { return }
+            Clipboard.copy(textView.string)
+        }
+
+        @objc private func cutSelection(_ sender: Any?) {
+            textView?.cut(sender)
+        }
+
+        @objc private func copySelection(_ sender: Any?) {
+            textView?.copy(sender)
+        }
+
+        @objc private func pasteClipboard(_ sender: Any?) {
+            guard parent.isEditable else { return }
+            textView?.paste(sender)
+        }
+
+        @objc private func deleteSelection(_ sender: Any?) {
+            guard parent.isEditable else { return }
+            textView?.delete(sender)
+        }
+
+        @objc private func selectAllText(_ sender: Any?) {
+            textView?.selectAll(sender)
+        }
+
+        @objc private func repeatRequest(_ sender: Any?) {
+            parent.repeatRequest?()
+        }
+
+        @objc private func copyAsCurl(_ sender: Any?) {
+            parent.copyAsCurl?()
+        }
+
         func apply(_ value: String) {
             guard let textView else { return }
             highlightTask?.cancel()
@@ -2056,7 +2143,49 @@ private struct HighlightedHTTPTextView: NSViewRepresentable {
             isApplying = false
             highlightTask = nil
         }
+
+        private func editableMenu() -> NSMenu {
+            let menu = NSMenu()
+            menu.allowsContextMenuPlugIns = false
+
+            menu.addItem(menuItem(title: "Repeat", action: #selector(repeatRequest(_:)), target: self))
+            menu.addItem(menuItem(title: "Copy as cURL", action: #selector(copyAsCurl(_:)), target: self))
+
+            menu.addItem(.separator())
+            menu.addItem(menuItem(title: "Cut", action: #selector(cutSelection(_:)), target: self))
+            menu.addItem(menuItem(title: "Copy", action: #selector(copySelection(_:)), target: self))
+            menu.addItem(menuItem(title: "Paste", action: #selector(pasteClipboard(_:)), target: self))
+            menu.addItem(menuItem(title: "Delete", action: #selector(deleteSelection(_:)), target: self))
+            menu.addItem(.separator())
+            menu.addItem(menuItem(title: "Select All", action: #selector(selectAllText(_:)), target: self))
+            menu.addItem(.separator())
+            menu.addItem(menuItem(title: "Copy All", action: #selector(copyAll(_:)), target: self))
+            return menu
+        }
+
+        private func readOnlyMenu() -> NSMenu {
+            let menu = NSMenu()
+            menu.allowsContextMenuPlugIns = false
+            menu.addItem(menuItem(title: "Copy", action: #selector(copySelection(_:)), target: self))
+            menu.addItem(menuItem(title: "Select All", action: #selector(selectAllText(_:)), target: self))
+            menu.addItem(.separator())
+            menu.addItem(menuItem(title: "Copy All", action: #selector(copyAll(_:)), target: self))
+            return menu
+        }
+
+        private func menuItem(title: String, action: Selector, target: AnyObject? = nil) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = target
+            item.image = nil
+            return item
+        }
     }
+}
+
+private enum HighlightedTextContextMenuStyle {
+    case none
+    case editable
+    case readOnly
 }
 
 private struct HighlightedTextLayout {
@@ -2455,21 +2584,24 @@ private enum HTTPHighlighter {
 
 private struct EmptyResponseSurface: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 7) {
-                Image(systemName: "arrow.right.circle")
-                    .font(.system(size: 13, weight: .semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: "paperplane")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(PostmeTheme.accent)
+                .frame(width: 36, height: 36)
+                .background(PostmeTheme.accentSoft, in: RoundedRectangle(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ready to send")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Press Command-Return to run the selected raw request. The response will appear here with status, headers, body, timing, and size.")
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text("Send a request")
-                    .font(.system(size: 13, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
-            Text("Press Command-Return to run the selected raw request.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
+        .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .rawSurfaceStyle()
     }
@@ -2479,15 +2611,22 @@ private struct ErrorResponseSurface: View {
     let message: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(PostmeTheme.danger)
+                Text("Request failed")
+                    .font(.system(size: 13.5, weight: .semibold))
+            }
+
             Text(message)
-                .font(.system(size: 12.5, design: .monospaced))
+                .font(.system(size: 12.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(12)
+        .padding(14)
         .rawSurfaceStyle()
     }
 }
@@ -2636,8 +2775,8 @@ private struct ClickableHoverStyleModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .shadow(color: isActive ? Color.black.opacity(0.16) : .clear, radius: isActive ? 5 : 0, x: 0, y: isActive ? 2 : 0)
-            .scaleEffect(isActive ? 1.012 : 1)
+            .shadow(color: isActive ? Color.black.opacity(0.08) : .clear, radius: isActive ? 4 : 0, x: 0, y: isActive ? 1 : 0)
+            .scaleEffect(isActive ? 1.008 : 1)
             .animation(.easeOut(duration: 0.14), value: isActive)
             .onHover { isHovering in
                 self.isHovering = isHovering
