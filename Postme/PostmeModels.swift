@@ -139,9 +139,23 @@ struct ResponseSnapshot: Codable, Equatable {
 struct HistoryEntry: Identifiable, Codable, Equatable {
     var id = UUID()
     var request: APIRequest
-    var response: ResponseSnapshot?
+    var statusCode: Int?
+    var reason: String?
+    var duration: TimeInterval?
+    var size: Int?
     var errorMessage: String?
     var sentAt: Date
+    
+    init(id: UUID = UUID(), request: APIRequest, response: ResponseSnapshot?, errorMessage: String?, sentAt: Date) {
+        self.id = id
+        self.request = request
+        self.statusCode = response?.statusCode
+        self.reason = response?.reason
+        self.duration = response?.duration
+        self.size = response?.size
+        self.errorMessage = errorMessage
+        self.sentAt = sentAt
+    }
 }
 
 enum SidebarMode: String, CaseIterable, Identifiable {

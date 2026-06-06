@@ -220,15 +220,18 @@ private struct HistoryEntryRow: View {
     }
 
     private var statusText: String {
-        if let response = entry.response {
-            return response.statusLine
+        if let errorMessage = entry.errorMessage {
+            return errorMessage
         }
-        return entry.errorMessage ?? "Failed"
+        if let statusCode = entry.statusCode, let reason = entry.reason {
+            return "\(statusCode) \(reason)"
+        }
+        return "Failed"
     }
 
     private var statusColor: Color {
-        if let response = entry.response {
-            return HTTPStatusTone.color(for: response.statusCode)
+        if let statusCode = entry.statusCode {
+            return HTTPStatusTone.color(for: statusCode)
         }
         return PostmeTheme.danger
     }
@@ -1233,9 +1236,18 @@ private struct CommandPaletteView: View {
         }
 
         items += store.history.prefix(20).map { entry in
-            CommandPaletteItem(
+            let statusText: String
+            if let errorMessage = entry.errorMessage {
+                statusText = errorMessage
+            } else if let statusCode = entry.statusCode, let reason = entry.reason {
+                statusText = "\(statusCode) \(reason)"
+            } else {
+                statusText = "Failed"
+            }
+            
+            return CommandPaletteItem(
                 title: entry.request.url,
-                subtitle: "\(entry.request.method.rawValue) \(entry.response?.statusLine ?? entry.errorMessage ?? "Failed")",
+                subtitle: "\(entry.request.method.rawValue) \(statusText)",
                 group: "History",
                 systemImage: "clock",
                 keywords: [entry.request.method.rawValue, entry.request.name],

@@ -143,7 +143,7 @@ final class PostmeStore: ObservableObject {
         requests.insert(request, at: 0)
         selectedRequestID = request.id
         sidebarMode = .collection
-        response = entry.response
+        response = nil
         errorMessage = entry.errorMessage
     }
 
@@ -288,15 +288,7 @@ final class PostmeStore: ObservableObject {
     private static func migratedWorkspace(_ workspace: Workspace) -> Workspace {
         Workspace(
             requests: workspace.requests.map(migratedRequest),
-            history: workspace.history.map { entry in
-                HistoryEntry(
-                    id: entry.id,
-                    request: migratedRequest(entry.request),
-                    response: entry.response,
-                    errorMessage: entry.errorMessage,
-                    sentAt: entry.sentAt
-                )
-            },
+            history: workspace.history,
             variables: workspace.variables
         )
     }
