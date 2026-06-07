@@ -66,7 +66,7 @@ bun run build
 
 ## Development Notes
 
-- App workspace data is persisted locally through `UserDefaults` with the `postme.workspace.v1` key.
+- App workspace data is persisted locally in SQLite under Application Support, with legacy `UserDefaults` workspaces migrated on first launch.
 - Request history is capped in the app store layer.
 - Raw requests can use environment variables before being sent.
 - The site uses Vite, React, TypeScript, Tailwind CSS v4, and shadcn/ui components.

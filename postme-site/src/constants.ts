@@ -44,5 +44,5 @@ export const shortcuts = [
 
 export const downloadUrl =
   "https://github.com/0xfelixli/Postme/releases/latest/download/Postme.dmg"
-export const releaseUrl = "https://github.com/0xfelixli/Postme/releases/tag/v1.0.1"
+export const releaseUrl = "https://github.com/0xfelixli/Postme/releases/tag/v2.0"
 export const repoUrl = "https://github.com/0xfelixli/Postme"
