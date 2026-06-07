@@ -140,7 +140,7 @@ function HeroSection() {
               className="size-12 rounded-xl ring-1 ring-border"
             />
             <Badge className="rounded-full border-primary/15 bg-primary/8 px-2.5 text-primary" variant="outline">
-              v1.0 可下载
+              v2.0 可下载
             </Badge>
           </div>
 
@@ -169,7 +169,7 @@ function HeroSection() {
 
           <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
             <a className="font-medium text-primary underline-offset-4 hover:underline" href={releaseUrl}>
-              GitHub Release v1.0
+              GitHub Release v2.0
             </a>
             <span>Postme.dmg · 1.0 MB</span>
             <span>macOS 26.5+</span>
